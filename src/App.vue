@@ -427,6 +427,9 @@ function sanitizeRichHtml(html = '') {
   return sanitized;
 }
 
+/**
+ * Returns a storage-safe Quill delta with unsafe image embeds and links removed.
+ */
 function sanitizeRichDelta(delta) {
   const ops = Array.isArray(delta?.ops) ? delta.ops : [];
   return {
