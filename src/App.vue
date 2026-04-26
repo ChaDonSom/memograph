@@ -428,29 +428,33 @@ function sanitizeRichHtml(html = '') {
 }
 
 function sanitizeRichDelta(delta) {
-  const cloned = JSON.parse(JSON.stringify(delta ?? { ops: [] }));
-  if (!Array.isArray(cloned.ops)) return { ops: [] };
+  const ops = Array.isArray(delta?.ops) ? delta.ops : [];
+  return {
+    ops: ops
+      .filter(op => {
+        if (!op || typeof op !== 'object') return false;
+        const image = typeof op.insert === 'object' ? op.insert?.image : null;
+        return !image || isSafeRichUrl(String(image), true);
+      })
+      .map(op => {
+        const cleaned = { ...op };
+        if (op.insert && typeof op.insert === 'object') {
+          cleaned.insert = { ...op.insert };
+        }
+        if (op.attributes && typeof op.attributes === 'object') {
+          cleaned.attributes = { ...op.attributes };
+        }
 
-  cloned.ops = cloned.ops
-    .filter(op => {
-      const image = op?.insert?.image;
-      return !image || isSafeRichUrl(String(image), true);
-    })
-    .map(op => {
-      const link = op?.attributes?.link;
-      if (!link || isSafeRichUrl(String(link))) return op;
+        const link = cleaned.attributes?.link;
+        if (!link || isSafeRichUrl(String(link))) return cleaned;
 
-      const { link: _link, ...attributes } = op.attributes;
-      const cleaned = { ...op };
-      if (Object.keys(attributes).length) {
-        cleaned.attributes = attributes;
-      } else {
-        delete cleaned.attributes;
-      }
-      return cleaned;
-    });
-
-  return cloned;
+        delete cleaned.attributes.link;
+        if (!Object.keys(cleaned.attributes).length) {
+          delete cleaned.attributes;
+        }
+        return cleaned;
+      }),
+  };
 }
 
 function splitRelationDescription(desc = '') {
