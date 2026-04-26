@@ -2,7 +2,7 @@
 <div class="layout">
 
   <!-- ── Sidebar ──────────────────────────────── -->
-  <div class="sidebar">
+  <div class="sidebar" :class="{ stuck: sidebarStuck }">
     <div class="s-head">
       <div class="brand">
         <svg width="13" height="13" viewBox="0 0 24 24" fill="none"
@@ -201,7 +201,7 @@
 </template>
 
 <script setup>
-import { computed, nextTick, onMounted, reactive, ref } from 'vue';
+import { computed, nextTick, onMounted, onUnmounted, reactive, ref } from 'vue';
 import Quill from 'quill';
 import { loadGraph, saveGraph } from './services/graphRepository.js';
 
@@ -243,6 +243,7 @@ function persist() {
 
 const currentId = ref(null);
 const search = ref('');
+const sidebarStuck = ref(false);
 let editor = null;
 let saveTimer = null;
 
@@ -493,10 +494,19 @@ function exportData() {
 }
 
 // ── Mount ─────────────────────────────────────────────────────────────
+function onScroll() {
+  sidebarStuck.value = window.scrollY > 0;
+}
+
 onMounted(async () => {
+  window.addEventListener('scroll', onScroll, { passive: true });
   if (nodes.value.length) {
     const latest = [...nodes.value].sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0))[0];
     await loadNode(latest.id);
   }
+});
+
+onUnmounted(() => {
+  window.removeEventListener('scroll', onScroll);
 });
 </script>

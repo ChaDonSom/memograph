@@ -606,6 +606,16 @@ body {
 
   .s-search {
     padding: 8px 10px;
+    max-height: 60px;
+    overflow: hidden;
+    transition: max-height 0.22s ease, padding-top 0.22s ease, padding-bottom 0.22s ease, border-bottom-width 0.15s ease;
+  }
+
+  .sidebar.stuck .s-search {
+    max-height: 0;
+    padding-top: 0;
+    padding-bottom: 0;
+    border-bottom-width: 0;
   }
 
   .s-list {
