@@ -465,7 +465,7 @@ function deletePage() {
 }
 
 // ── Edges ─────────────────────────────────────────────────────────────
-async function openModal() {
+function openModal() {
   Object.assign(modal, {
     on: true,
     targetId: '',
@@ -475,8 +475,7 @@ async function openModal() {
     dir: 'out',
     w: DEFAULT_EDGE_WEIGHT,
   });
-  await nextTick();
-  initRelationEditor();
+  nextTick(initRelationEditor);
 }
 
 function closeModal() {
@@ -503,7 +502,7 @@ function saveRel() {
   const cid = currentId.value;
   const from = modal.dir === 'in' ? modal.targetId : cid;
   const to = modal.dir === 'in' ? cid : modal.targetId;
-  const desc = relEditor.getText().replace(/\s+$/, '');
+  const desc = relEditor.getText().trim();
   const descDelta = JSON.stringify(relEditor.getContents());
   const descHtml = normalizeEditorHtml(relEditor.root.innerHTML);
   edges.value.push({ id: uid(), fromId: from, toId: to, desc, descDelta, descHtml, weight: modal.w });
