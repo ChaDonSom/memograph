@@ -509,6 +509,13 @@ body {
 .field textarea { resize: vertical; min-height: 72px; }
 .field select option { background: var(--surface2); }
 
+.field-error {
+  margin-top: 7px;
+  color: var(--danger);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
 .target-picker {
   display: flex;
   flex-direction: column;

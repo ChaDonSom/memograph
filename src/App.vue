@@ -185,6 +185,7 @@
       <div class="rel-editor-wrap">
         <div id="rel-editor"></div>
       </div>
+      <div class="field-error" v-if="modal.editorError">{{ modal.editorError }}</div>
     </div>
 
     <div class="field">
@@ -206,7 +207,7 @@
 
     <div class="modal-btns">
       <button class="btn btn-ghost" @click="closeModal">Cancel</button>
-      <button class="btn btn-primary" @click="saveRel" :disabled="!modal.targetId">Save</button>
+      <button class="btn btn-primary" @click="saveRel" :disabled="!modal.targetId || !!modal.editorError">Save</button>
     </div>
   </div>
 </div>
@@ -275,6 +276,7 @@ const modal = reactive({
   targetId: '',
   targetSearch: '',
   desc: '',
+  editorError: '',
   dir: 'out',
   w: DEFAULT_EDGE_WEIGHT,
 });
@@ -399,9 +401,11 @@ function initRelationEditor() {
         toolbar: RICH_CONTENT_TOOLBAR
       },
     });
+    modal.editorError = '';
   } catch (error) {
     relEditor = null;
-    console.warn('Unable to initialize the relation editor.', error);
+    modal.editorError = 'Unable to initialize the relation editor. Close this dialog and try again.';
+    console.warn(modal.editorError, error);
   }
 }
 
@@ -467,6 +471,7 @@ async function openModal() {
     targetId: '',
     targetSearch: '',
     desc: '',
+    editorError: '',
     dir: 'out',
     w: DEFAULT_EDGE_WEIGHT,
   });
@@ -476,7 +481,6 @@ async function openModal() {
 
 function closeModal() {
   modal.on = false;
-  if (relEditor) relEditor.disable();
   relEditor = null;
 }
 
@@ -491,7 +495,11 @@ function createModalTarget() {
 }
 
 function saveRel() {
-  if (!modal.targetId || !relEditor) return;
+  if (!modal.targetId) return;
+  if (!relEditor) {
+    modal.editorError = 'Unable to save because the relation editor is unavailable. Close this dialog and try again.';
+    return;
+  }
   const cid = currentId.value;
   const from = modal.dir === 'in' ? modal.targetId : cid;
   const to = modal.dir === 'in' ? cid : modal.targetId;
