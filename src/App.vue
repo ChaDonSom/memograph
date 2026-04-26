@@ -82,12 +82,14 @@
             <!-- Incoming: other page is the subject, its title leads -->
             <template v-if="r.dir.startsWith('←')">
               <div class="rel-title">{{ r.title }}</div>
-              <div class="rel-desc" v-if="r.desc">{{ r.desc }}</div>
+              <div class="rel-label-text" v-if="r.label">{{ r.label }}</div>
+              <div class="rel-detail" v-if="r.detail">{{ r.detail }}</div>
             </template>
-            <!-- Outgoing: description is the predicate, target title follows -->
+            <!-- Outgoing: relation label is the predicate, target title follows -->
             <template v-else>
-              <div class="rel-desc" v-if="r.desc">{{ r.desc }}</div>
+              <div class="rel-label-text" v-if="r.label">{{ r.label }}</div>
               <div class="rel-title">{{ r.title }}</div>
+              <div class="rel-detail" v-if="r.detail">{{ r.detail }}</div>
             </template>
             <div class="rel-foot">
               <span class="rel-score">P={{ r.score.toFixed(1) }}</span>
@@ -169,7 +171,7 @@
       <label>Description / label</label>
       <textarea
         v-model="modal.desc"
-        placeholder="e.g. 'raced on dirt ovals', 'created from scratch in 1904', 'good sim racing progression after Ford 999'…"
+        placeholder="First line is the relation label. Add more lines for details shown below the related page title."
       ></textarea>
     </div>
 
@@ -271,6 +273,14 @@ const modalTargetCreateLabel = computed(() => {
   return title ? `"${title}"` : 'untitled page';
 });
 
+function splitRelationDescription(desc = '') {
+  const [label = '', ...detailLines] = desc.replace(/\r\n/g, '\n').split('\n');
+  return {
+    label: label.trim(),
+    detail: detailLines.join('\n').replace(/\s+$/, ''),
+  };
+}
+
 const ranked = computed(() => {
   if (!currentId.value) return [];
   const cid = currentId.value;
@@ -282,11 +292,13 @@ const ranked = computed(() => {
     if (!tid) continue;
     const t = nodes.value.find(n => n.id === tid);
     if (!t) continue;
+    const relationText = splitRelationDescription(e.desc);
     out.push({
       edgeId:   e.id,
       targetId: tid,
       title:    t.title || '(untitled)',
-      desc:     e.desc || '',
+      label:    relationText.label,
+      detail:   relationText.detail,
       dir,
       score:    pScore(e, t),
     });

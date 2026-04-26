@@ -311,11 +311,18 @@ body {
   color: var(--dim);
 }
 
-.rel-desc {
+.rel-label-text {
   font-size: 12px;
   color: var(--muted);
   font-style: italic;
   line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+.rel-detail {
+  font-size: 12px;
+  color: var(--muted);
+  line-height: 1.45;
   overflow-wrap: anywhere;
   white-space: pre-wrap;
 }
