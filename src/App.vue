@@ -91,14 +91,12 @@
             <!-- Incoming: other page is the subject, its title leads -->
             <template v-if="r.dir.startsWith('←')">
               <div class="rel-title">{{ r.title }}</div>
-              <div class="rel-label-text" v-if="r.label">{{ r.label }}</div>
-              <div class="rel-detail" v-if="r.detail">{{ r.detail }}</div>
+              <div class="rel-rich" v-if="r.relationHtml" v-html="r.relationHtml"></div>
             </template>
             <!-- Outgoing: relation label is the predicate, target title follows -->
             <template v-else>
-              <div class="rel-label-text" v-if="r.label">{{ r.label }}</div>
+              <div class="rel-rich" v-if="r.relationHtml" v-html="r.relationHtml"></div>
               <div class="rel-title">{{ r.title }}</div>
-              <div class="rel-detail" v-if="r.detail">{{ r.detail }}</div>
             </template>
             <div class="rel-foot">
               <span class="rel-score">P={{ r.score.toFixed(1) }}</span>
@@ -178,10 +176,9 @@
 
     <div class="field">
       <label>Description / label</label>
-      <textarea
-        v-model="modal.desc"
-        placeholder="First line is the relation label. Add more lines for details shown below the related page title."
-      ></textarea>
+      <div class="rel-editor-wrap">
+        <div id="rel-editor"></div>
+      </div>
     </div>
 
     <div class="field">
@@ -255,7 +252,17 @@ const search = ref('');
 const listOpen = ref(false);
 const sidebarEl = ref(null);
 let editor = null;
+let relEditor = null;
 let saveTimer = null;
+
+const RICH_CONTENT_TOOLBAR = [
+  ['bold', 'italic', 'underline', 'strike'],
+  [{ header: [1, 2, 3, false] }],
+  ['blockquote', 'code-block'],
+  [{ list: 'ordered' }, { list: 'bullet' }],
+  ['link', 'image'],
+  ['clean'],
+];
 
 const modal = reactive({
   on: false,
@@ -298,12 +305,31 @@ const modalTargetCreateLabel = computed(() => {
   return title ? `"${title}"` : 'untitled page';
 });
 
-function splitRelationDescription(desc = '') {
-  const [label = '', ...detailLines] = desc.replace(/\r\n/g, '\n').split('\n');
-  return {
-    label: label.trim(),
-    detail: detailLines.join('\n').replace(/\s+$/, ''),
-  };
+function escapeHtml(value = '') {
+  return value.replace(/[&<>"']/g, char => ({
+    '&': '&amp;',
+    '<': '&lt;',
+    '>': '&gt;',
+    '"': '&quot;',
+    "'": '&#39;',
+  }[char]));
+}
+
+function plainTextToHtml(desc = '') {
+  const normalized = desc.replace(/\r\n/g, '\n').trim();
+  if (!normalized) return '';
+  return normalized
+    .split('\n')
+    .map(line => line ? `<p>${escapeHtml(line)}</p>` : '<p><br></p>')
+    .join('');
+}
+
+function normalizeEditorHtml(html = '') {
+  return html === '<p><br></p>' ? '' : html;
+}
+
+function getRelationHtml(edge) {
+  return normalizeEditorHtml(edge.descHtml || '') || plainTextToHtml(edge.desc);
 }
 
 function findNode(id) {
@@ -327,13 +353,11 @@ const ranked = computed(() => {
     if (!tid) continue;
     const t = findNode(tid);
     if (!t) continue;
-    const relationText = splitRelationDescription(e.desc);
     out.push({
       edgeId: e.id,
       targetId: tid,
       title: t.title || '(untitled)',
-      label: relationText.label,
-      detail: relationText.detail,
+      relationHtml: getRelationHtml(e),
       dir,
       score: pScore(e, t),
     });
@@ -353,14 +377,7 @@ function initEditor() {
     theme: 'snow',
     placeholder: 'Write something about this page…',
     modules: {
-      toolbar: [
-        ['bold', 'italic', 'underline', 'strike'],
-        [{ header: [1, 2, 3, false] }],
-        ['blockquote', 'code-block'],
-        [{ list: 'ordered' }, { list: 'bullet' }],
-        ['link'],
-        ['clean'],
-      ]
+      toolbar: RICH_CONTENT_TOOLBAR
     },
   });
   const node = current.value;
@@ -372,6 +389,16 @@ function initEditor() {
     }
   }
   editor.on('text-change', queueSave);
+}
+
+function initRelationEditor() {
+  relEditor = new Quill('#rel-editor', {
+    theme: 'snow',
+    placeholder: 'Describe this relation. Images are supported.',
+    modules: {
+      toolbar: RICH_CONTENT_TOOLBAR
+    },
+  });
 }
 
 function queueSave() {
@@ -430,7 +457,7 @@ function deletePage() {
 }
 
 // ── Edges ─────────────────────────────────────────────────────────────
-function openModal() {
+async function openModal() {
   Object.assign(modal, {
     on: true,
     targetId: '',
@@ -439,10 +466,13 @@ function openModal() {
     dir: 'out',
     w: DEFAULT_EDGE_WEIGHT,
   });
+  await nextTick();
+  initRelationEditor();
 }
 
 function closeModal() {
   modal.on = false;
+  relEditor = null;
 }
 
 function selectModalTarget(node) {
@@ -460,11 +490,14 @@ function saveRel() {
   const cid = currentId.value;
   const from = modal.dir === 'in' ? modal.targetId : cid;
   const to = modal.dir === 'in' ? cid : modal.targetId;
-  edges.value.push({ id: uid(), fromId: from, toId: to, desc: modal.desc, weight: modal.w });
+  const desc = relEditor ? relEditor.getText().replace(/\s+$/, '') : modal.desc;
+  const descDelta = relEditor ? JSON.stringify(relEditor.getContents()) : '';
+  const descHtml = relEditor ? normalizeEditorHtml(relEditor.root.innerHTML) : '';
+  edges.value.push({ id: uid(), fromId: from, toId: to, desc, descDelta, descHtml, weight: modal.w });
   if (modal.dir === 'bi') {
-    edges.value.push({ id: uid(), fromId: to, toId: from, desc: modal.desc, weight: modal.w });
+    edges.value.push({ id: uid(), fromId: to, toId: from, desc, descDelta, descHtml, weight: modal.w });
   }
-  modal.on = false;
+  closeModal();
   persist();
 }
 
