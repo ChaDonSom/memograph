@@ -212,26 +212,21 @@
 <script setup>
 import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue';
 import Quill from 'quill';
+import {
+  DEFAULT_EDGE_WEIGHT,
+  createEdgeRecord,
+  createNodeRecord,
+  findNodeById,
+  priorityScore,
+  sortByUpdatedDesc,
+  splitRelationDescription,
+} from './services/graphModel.js';
 import { loadGraph, saveGraph } from './services/graphRepository.js';
 
-const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
-
-const DEFAULT_EDGE_WEIGHT = 5;
 const SAVE_DELAY_MS = 500;
-const MS_PER_DAY = 86_400_000;
 const PREVIEW_WIDTH = 300;
 const PREVIEW_GUTTER = 18;
 const PREVIEW_HEIGHT_WITH_GUTTER = 230;
-
-// Score = explicit weight (dominant) + visit popularity + recency decay.
-// This determines the ranking order of relation cards on each page.
-function pScore(edge, target) {
-  const weight = (edge.weight || DEFAULT_EDGE_WEIGHT) * 3;
-  const popularity = Math.log2((target.visits || 0) + 1) * 2;
-  const daysSinceUpdate = (Date.now() - (target.updatedAt || 0)) / MS_PER_DAY;
-  const recency = 8 * Math.exp(-daysSinceUpdate / 7);
-  return weight + popularity + recency;
-}
 
 function timeAgo(ts) {
   if (!ts) return 'never';
@@ -275,7 +270,7 @@ const current = computed(() =>
 const filteredNodes = computed(() =>
   nodes.value
     .filter(n => (n.title || '').toLowerCase().includes(search.value.toLowerCase()))
-    .sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0))
+    .sort(sortByUpdatedDesc)
 );
 
 const otherNodes = computed(() =>
@@ -290,7 +285,7 @@ const modalTargetOptions = computed(() => {
   const query = modal.targetSearch.trim().toLowerCase();
   return otherNodes.value
     .filter(n => !query || (n.title || '').toLowerCase().includes(query))
-    .sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+    .sort(sortByUpdatedDesc);
 });
 
 const modalTargetCreateLabel = computed(() => {
@@ -298,16 +293,8 @@ const modalTargetCreateLabel = computed(() => {
   return title ? `"${title}"` : 'untitled page';
 });
 
-function splitRelationDescription(desc = '') {
-  const [label = '', ...detailLines] = desc.replace(/\r\n/g, '\n').split('\n');
-  return {
-    label: label.trim(),
-    detail: detailLines.join('\n').replace(/\s+$/, ''),
-  };
-}
-
 function findNode(id) {
-  return nodes.value.find(n => n.id === id) ?? null;
+  return findNodeById(nodes.value, id);
 }
 
 const ranked = computed(() => {
@@ -335,7 +322,7 @@ const ranked = computed(() => {
       label: relationText.label,
       detail: relationText.detail,
       dir,
-      score: pScore(e, t),
+      score: priorityScore(e, t),
     });
   }
   return out.sort((a, b) => b.score - a.score);
@@ -400,15 +387,7 @@ async function loadNode(id) {
 }
 
 function createGraphNode(title = '') {
-  const node = {
-    id: uid(),
-    title,
-    bodyDelta: '',
-    bodyHtml: '',
-    visits: 0,
-    createdAt: Date.now(),
-    updatedAt: Date.now(),
-  };
+  const node = createNodeRecord(title);
   nodes.value.unshift(node);
   persist();
   return node;
@@ -460,9 +439,9 @@ function saveRel() {
   const cid = currentId.value;
   const from = modal.dir === 'in' ? modal.targetId : cid;
   const to = modal.dir === 'in' ? cid : modal.targetId;
-  edges.value.push({ id: uid(), fromId: from, toId: to, desc: modal.desc, weight: modal.w });
+  edges.value.push(createEdgeRecord(from, to, modal.desc, modal.w));
   if (modal.dir === 'bi') {
-    edges.value.push({ id: uid(), fromId: to, toId: from, desc: modal.desc, weight: modal.w });
+    edges.value.push(createEdgeRecord(to, from, modal.desc, modal.w));
   }
   modal.on = false;
   persist();
@@ -518,7 +497,7 @@ watch(listOpen, (open) => {
 // ── Mount ─────────────────────────────────────────────────────────────
 onMounted(async () => {
   if (nodes.value.length) {
-    const latest = [...nodes.value].sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0))[0];
+    const latest = [...nodes.value].sort(sortByUpdatedDesc)[0];
     await loadNode(latest.id);
   }
 });
