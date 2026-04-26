@@ -489,7 +489,7 @@ function exportData() {
   a.href = url;
   a.download = 'memograph.json';
   a.click();
-  URL.revokeObjectURL(url);
+  setTimeout(() => URL.revokeObjectURL(url), 0);
 }
 
 // ── Mount ─────────────────────────────────────────────────────────────
