@@ -146,6 +146,9 @@ body {
 }
 .btn-icon:hover { color: var(--text); border-color: var(--border2); }
 
+/* s-list-toggle only visible on mobile when stuck */
+.s-list-toggle { display: none; }
+
 /* ── Main ──────────────────────────────────────── */
 .main { flex: 1; overflow: hidden; display: flex; flex-direction: column; min-width: 0; }
 
@@ -606,16 +609,50 @@ body {
 
   .s-search {
     padding: 8px 10px;
-    max-height: 60px;
-    overflow: hidden;
-    transition: max-height 0.2s ease, padding-top 0.2s ease, padding-bottom 0.2s ease, border-bottom-width 0.2s ease;
   }
 
-  .sidebar.stuck .s-search {
+  /* Pages list toggle button — shown when sidebar is stuck */
+  .sidebar.stuck .s-list-toggle {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    width: 100%;
+    padding: 6px 12px;
+    background: var(--surface2);
+    border: none;
+    border-bottom: 1px solid var(--border);
+    color: var(--muted);
+    font-size: 12.5px;
+    font-family: inherit;
+    cursor: pointer;
+    transition: color 0.15s;
+  }
+  .sidebar.stuck .s-list-toggle:hover { color: var(--text); }
+
+  /* Collapse list when stuck; expand as overlay when list-open */
+  .sidebar.stuck .s-list {
     max-height: 0;
-    padding-top: 0;
-    padding-bottom: 0;
-    border-bottom-width: 0;
+    overflow: hidden;
+  }
+  .sidebar.stuck.list-open .s-list {
+    position: absolute;
+    left: 0;
+    right: 0;
+    top: 100%;
+    max-height: 50dvh;
+    overflow-y: auto;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
+    z-index: 20;
+  }
+
+  /* Compact "New Page" to a "+" icon button when stuck */
+  .sidebar.stuck .btn-new {
+    flex: none;
+    width: 36px;
+    padding: 8px 0;
+    font-size: 18px;
   }
 
   .s-list {

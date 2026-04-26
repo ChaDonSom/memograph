@@ -2,7 +2,7 @@
 <div class="layout">
 
   <!-- ── Sidebar ──────────────────────────────── -->
-  <div class="sidebar" :class="{ stuck: sidebarStuck }">
+  <div class="sidebar" :class="{ stuck: sidebarStuck, 'list-open': listOpen }">
     <div class="s-head">
       <div class="brand">
         <svg width="13" height="13" viewBox="0 0 24 24" fill="none"
@@ -18,6 +18,11 @@
       <input v-model="search" placeholder="Search pages…" />
     </div>
 
+    <button class="s-list-toggle" @click="listOpen = !listOpen">
+      <span>{{ nodes.length }} pages</span>
+      <span class="s-list-toggle-arrow">{{ listOpen ? '▲' : '▼' }}</span>
+    </button>
+
     <div class="s-list">
       <div
         v-for="n in filteredNodes"
@@ -29,7 +34,7 @@
     </div>
 
     <div class="s-foot">
-      <button class="btn-new" @click="createNode">+ New Page</button>
+      <button class="btn-new" title="New Page" @click="createNode">{{ sidebarStuck ? '+' : '+ New Page' }}</button>
       <button class="btn-icon" title="Export JSON" @click="exportData">↓</button>
     </div>
   </div>
@@ -201,7 +206,7 @@
 </template>
 
 <script setup>
-import { computed, nextTick, onMounted, onUnmounted, reactive, ref } from 'vue';
+import { computed, nextTick, onMounted, onUnmounted, reactive, ref, watch } from 'vue';
 import Quill from 'quill';
 import { loadGraph, saveGraph } from './services/graphRepository.js';
 
@@ -244,6 +249,7 @@ function persist() {
 const currentId = ref(null);
 const search = ref('');
 const sidebarStuck = ref(false);
+const listOpen = ref(false);
 let editor = null;
 let saveTimer = null;
 
@@ -498,6 +504,10 @@ function onScroll() {
   const stuck = window.scrollY > 0;
   if (sidebarStuck.value !== stuck) sidebarStuck.value = stuck;
 }
+
+watch(sidebarStuck, (stuck) => {
+  if (!stuck) listOpen.value = false;
+});
 
 onMounted(async () => {
   window.addEventListener('scroll', onScroll, { passive: true });
