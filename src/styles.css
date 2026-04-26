@@ -577,3 +577,52 @@ body {
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
 ::-webkit-scrollbar-thumb:hover { background: var(--border2); }
+
+@media (max-width: 700px) {
+  body { overflow: auto; }
+
+  .layout {
+    flex-direction: column;
+    height: 100dvh;
+  }
+
+  .sidebar {
+    width: 100%;
+    min-width: 0;
+    max-height: 38dvh;
+    border-right: none;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .s-head {
+    padding: 10px 14px;
+  }
+
+  .s-search {
+    padding: 8px 10px;
+  }
+
+  .s-list {
+    min-height: 0;
+  }
+
+  .n-item {
+    padding: 9px 14px;
+  }
+
+  .s-foot {
+    padding: 10px;
+  }
+
+  .main {
+    flex: 1 1 auto;
+  }
+
+  .main-scroll {
+    padding: 28px 18px 40px;
+  }
+
+  .page-title {
+    font-size: 25px;
+  }
+}
