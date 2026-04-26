@@ -608,7 +608,7 @@ body {
     padding: 8px 10px;
     max-height: 60px;
     overflow: hidden;
-    transition: max-height 0.22s ease, padding-top 0.22s ease, padding-bottom 0.22s ease, border-bottom-width 0.15s ease;
+    transition: max-height 0.2s ease, padding-top 0.2s ease, padding-bottom 0.2s ease, border-bottom-width 0.2s ease;
   }
 
   .sidebar.stuck .s-search {

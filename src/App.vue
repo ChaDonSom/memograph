@@ -495,7 +495,8 @@ function exportData() {
 
 // ── Mount ─────────────────────────────────────────────────────────────
 function onScroll() {
-  sidebarStuck.value = window.scrollY > 0;
+  const stuck = window.scrollY > 0;
+  if (sidebarStuck.value !== stuck) sidebarStuck.value = stuck;
 }
 
 onMounted(async () => {
