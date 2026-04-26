@@ -363,14 +363,14 @@ function loadImage(src) {
  * Resizes an image so its longest edge fits maxEdgeLength and returns a data URL.
  */
 function imageToDataUrl(image, maxEdgeLength, type = 'image/jpeg', imageQuality) {
-  const scale = Math.min(1, maxEdgeLength / Math.max(image.naturalWidth, image.naturalHeight));
+  const scale = Math.min(1, maxEdgeLength / Math.max(1, image.naturalWidth, image.naturalHeight));
   const canvas = document.createElement('canvas');
   canvas.width = Math.max(1, Math.round(image.naturalWidth * scale));
   canvas.height = Math.max(1, Math.round(image.naturalHeight * scale));
 
   const ctx = canvas.getContext('2d');
   if (!ctx) {
-    console.warn('Unable to resize image upload because this browser could not create a canvas context. Try another browser if image insertion fails.');
+    console.warn('Unable to resize image upload because this browser could not create a canvas context. The image will not be inserted; try another browser if this continues.');
     return '';
   }
   if (type === 'image/jpeg') {
@@ -433,6 +433,7 @@ async function prepareImageUpload(file) {
 }
 
 async function handleImageUpload(quill, range, files) {
+  const fileCount = files.length;
   const images = (await Promise.all(
     Array.from(files, file => prepareImageUpload(file).catch(error => {
       console.warn(`Unable to prepare image upload for ${file.name || file.type || 'selected file'}.`, error);
@@ -440,7 +441,13 @@ async function handleImageUpload(quill, range, files) {
     }))
   )).filter(Boolean);
 
-  if (!images.length) return;
+  if (!images.length) {
+    alert('Unable to add that image. Try a smaller image or a different image format.');
+    return;
+  }
+  if (images.length < fileCount) {
+    alert('Some images could not be added. Try smaller images or a different image format.');
+  }
 
   quill.deleteText(range.index, range.length, 'user');
   let insertAt = range.index;
