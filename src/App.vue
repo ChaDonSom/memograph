@@ -271,6 +271,18 @@ const RICH_CONTENT_TOOLBAR = [
   ['clean'],
 ];
 
+const RICH_ALLOWED_TAGS = new Set([
+  'A', 'B', 'BLOCKQUOTE', 'BR', 'CODE', 'DIV', 'EM', 'H1', 'H2', 'H3', 'IMG',
+  'LI', 'OL', 'P', 'PRE', 'S', 'SPAN', 'STRONG', 'U', 'UL',
+]);
+const RICH_GLOBAL_ATTRS = new Set(['class']);
+const RICH_ALLOWED_ATTRS = {
+  A: new Set(['href', 'rel', 'target', 'title']),
+  IMG: new Set(['alt', 'src', 'title']),
+  LI: new Set(['data-list']),
+  SPAN: new Set(['contenteditable']),
+};
+
 const modal = reactive({
   on: false,
   targetId: '',
@@ -317,6 +329,73 @@ function normalizeEditorHtml(html = '') {
   return html === '<p><br></p>' ? '' : html;
 }
 
+function isSafeRichUrl(value, allowDataImage = false) {
+  const trimmed = value.trim();
+  if (allowDataImage && /^data:image\/(png|jpe?g|gif|webp);base64,/i.test(trimmed)) {
+    return true;
+  }
+
+  try {
+    const url = new URL(trimmed, window.location.origin);
+    return ['http:', 'https:', 'mailto:'].includes(url.protocol);
+  } catch {
+    return false;
+  }
+}
+
+function sanitizeRichHtml(html = '') {
+  const template = document.createElement('template');
+  template.innerHTML = html;
+
+  function cleanNode(node) {
+    if (node.nodeType !== Node.ELEMENT_NODE) return;
+
+    const element = node;
+    if (!RICH_ALLOWED_TAGS.has(element.tagName)) {
+      if (['SCRIPT', 'STYLE'].includes(element.tagName)) {
+        element.remove();
+      } else {
+        element.replaceWith(...element.childNodes);
+      }
+      return;
+    }
+
+    for (const attr of [...element.attributes]) {
+      const allowedForTag = RICH_ALLOWED_ATTRS[element.tagName] ?? new Set();
+      const isAllowed = RICH_GLOBAL_ATTRS.has(attr.name) || allowedForTag.has(attr.name);
+      if (!isAllowed || attr.name.startsWith('on')) {
+        element.removeAttribute(attr.name);
+      }
+    }
+
+    if (element.tagName === 'A') {
+      const href = element.getAttribute('href');
+      if (!href || !isSafeRichUrl(href)) {
+        element.removeAttribute('href');
+      } else {
+        element.setAttribute('rel', 'noopener noreferrer');
+        element.setAttribute('target', '_blank');
+      }
+    }
+
+    if (element.tagName === 'IMG') {
+      const src = element.getAttribute('src');
+      if (!src || !isSafeRichUrl(src, true)) {
+        element.remove();
+        return;
+      }
+    }
+  }
+
+  let current;
+  const walker = document.createTreeWalker(template.content, NodeFilter.SHOW_ELEMENT);
+  while ((current = walker.nextNode())) {
+    cleanNode(current);
+  }
+
+  return template.innerHTML;
+}
+
 function splitRelationDescription(desc = '') {
   const [label = '', ...detailLines] = desc.replace(/\r\n/g, '\n').split('\n');
   return {
@@ -346,7 +425,7 @@ const ranked = computed(() => {
     if (!tid) continue;
     const t = findNode(tid);
     if (!t) continue;
-    const relationHtml = normalizeEditorHtml(e.descHtml || '');
+    const relationHtml = sanitizeRichHtml(normalizeEditorHtml(e.descHtml || ''));
     let label = '';
     let detail = '';
     if (!relationHtml) {
@@ -418,7 +497,7 @@ function flush() {
   const node = current.value;
   if (node && editor) {
     node.bodyDelta = JSON.stringify(editor.getContents());
-    node.bodyHtml = editor.root.innerHTML;
+    node.bodyHtml = sanitizeRichHtml(editor.root.innerHTML);
     node.updatedAt = Date.now();
   }
   persist();
@@ -504,7 +583,7 @@ function saveRel() {
   const to = modal.dir === 'in' ? cid : modal.targetId;
   const desc = relEditor.getText().trim();
   const descDelta = JSON.stringify(relEditor.getContents());
-  const descHtml = normalizeEditorHtml(relEditor.root.innerHTML);
+  const descHtml = sanitizeRichHtml(normalizeEditorHtml(relEditor.root.innerHTML));
   edges.value.push({ id: uid(), fromId: from, toId: to, desc, descDelta, descHtml, weight: modal.w });
   if (modal.dir === 'bi') {
     edges.value.push({ id: uid(), fromId: to, toId: from, desc, descDelta, descHtml, weight: modal.w });
@@ -526,7 +605,7 @@ function showPrev(evt, tid) {
   const x = Math.min(rect.right + 12, window.innerWidth - PREVIEW_WIDTH - PREVIEW_GUTTER);
   const y = Math.max(8, Math.min(rect.top, window.innerHeight - PREVIEW_HEIGHT_WITH_GUTTER));
   prev.title = t.title || '(untitled)';
-  prev.html = t.bodyHtml || '<em style="opacity:.45">No content yet.</em>';
+  prev.html = sanitizeRichHtml(t.bodyHtml || '') || '<em style="opacity:.45">No content yet.</em>';
   prev.x = x;
   prev.y = y;
   prev.on = true;
