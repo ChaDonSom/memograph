@@ -359,7 +359,7 @@ function loadImage(src) {
   });
 }
 
-function imageToDataUrl(image, maxEdgeLength, type = 'image/jpeg', imageQuality = 0.92) {
+function imageToDataUrl(image, maxEdgeLength, type = 'image/jpeg', imageQuality = UPLOAD_IMAGE_QUALITIES[0]) {
   const scale = Math.min(1, maxEdgeLength / Math.max(image.naturalWidth, image.naturalHeight));
   const canvas = document.createElement('canvas');
   canvas.width = Math.max(1, Math.round(image.naturalWidth * scale));
@@ -413,6 +413,7 @@ async function prepareImageUpload(file) {
       if (isSafeRichUrl(png, true)) return png;
     }
 
+    // If a PNG is still too large, fall back to JPEG so the image can persist.
     for (const imageQuality of UPLOAD_IMAGE_QUALITIES) {
       const jpeg = imageToDataUrl(image, maxEdgeLength, 'image/jpeg', imageQuality);
       if (isSafeRichUrl(jpeg, true)) return jpeg;
@@ -442,6 +443,7 @@ async function handleImageUpload(quill, range, files) {
 }
 
 function imageUploadHandler(range, files) {
+  // Quill calls uploader handlers with the uploader module as `this`.
   if (!this?.quill) return Promise.resolve();
   return handleImageUpload(this.quill, range, files);
 }
