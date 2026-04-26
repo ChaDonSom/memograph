@@ -365,6 +365,7 @@ function imageToDataUrl(image, maxDimension, type = 'image/jpeg', quality) {
   canvas.height = Math.max(1, Math.round(image.naturalHeight * scale));
 
   const ctx = canvas.getContext('2d');
+  if (!ctx) return '';
   if (type === 'image/jpeg') {
     ctx.fillStyle = '#ffffff';
     ctx.fillRect(0, 0, canvas.width, canvas.height);
@@ -416,7 +417,7 @@ async function prepareImageUpload(file) {
   return '';
 }
 
-async function handleImageUpload(range, files) {
+async function handleImageUpload(quill, range, files) {
   const images = (await Promise.all(
     Array.from(files, file => prepareImageUpload(file).catch(error => {
       console.warn('Unable to prepare image upload.', error);
@@ -426,11 +427,15 @@ async function handleImageUpload(range, files) {
 
   if (!images.length) return;
 
-  this.quill.deleteText(range.index, range.length, 'user');
+  quill.deleteText(range.index, range.length, 'user');
   images.forEach((image, index) => {
-    this.quill.insertEmbed(range.index + index, 'image', image, 'user');
+    quill.insertEmbed(range.index + index, 'image', image, 'user');
   });
-  this.quill.setSelection(range.index + images.length, 0, 'silent');
+  quill.setSelection(range.index + images.length, 0, 'silent');
+}
+
+function uploadImages(range, files) {
+  handleImageUpload(this.quill, range, files);
 }
 
 function sanitizeRichHtml(html = '') {
@@ -596,7 +601,7 @@ function initEditor() {
     modules: {
       toolbar: RICH_CONTENT_TOOLBAR,
       uploader: {
-        handler: handleImageUpload,
+        handler: uploadImages,
       },
     },
   });
@@ -619,7 +624,7 @@ function initRelationEditor() {
       modules: {
         toolbar: RICH_CONTENT_TOOLBAR,
         uploader: {
-          handler: handleImageUpload,
+          handler: uploadImages,
         },
       },
     });
