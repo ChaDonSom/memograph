@@ -584,7 +584,9 @@ body {
 
   .layout {
     flex-direction: column;
-    height: 100dvh;
+    height: auto;
+    min-height: 100dvh;
+    overflow: visible;
   }
 
   .sidebar {
@@ -593,6 +595,9 @@ body {
     max-height: 38dvh;
     border-right: none;
     border-bottom: 1px solid var(--border);
+    position: sticky;
+    top: 0;
+    z-index: 10;
   }
 
   .s-head {
@@ -617,10 +622,12 @@ body {
 
   .main {
     flex: 1 1 auto;
+    overflow: visible;
   }
 
   .main-scroll {
     padding: 28px 18px 40px;
+    overflow-y: visible;
   }
 
   .page-title {
