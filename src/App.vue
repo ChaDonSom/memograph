@@ -226,9 +226,9 @@ const MS_PER_DAY = 86_400_000;
 const PREVIEW_WIDTH = 300;
 const PREVIEW_GUTTER = 18;
 const PREVIEW_HEIGHT_WITH_GUTTER = 230;
-// Keep embedded data images below a 5,000,000-character URL budget (~3.75 MB raw image)
-// to avoid oversized localStorage records and slow renders.
-const MAX_DATA_IMAGE_URL_LENGTH = 5_000_000;
+// Keep embedded data images below a conservative URL budget because each page
+// stores both Quill delta and preview HTML in localStorage.
+const MAX_DATA_IMAGE_URL_LENGTH = 1_500_000;
 const MAX_SANITIZED_HTML_CACHE_ENTRIES = 200;
 
 // Score = explicit weight (dominant) + visit popularity + recency decay.
@@ -255,7 +255,11 @@ const nodes = ref(stored.nodes);
 const edges = ref(stored.edges);
 
 function persist() {
-  saveGraph(nodes.value, edges.value);
+  try {
+    saveGraph(nodes.value, edges.value);
+  } catch (error) {
+    console.warn('Unable to save Memograph data to localStorage.', error);
+  }
 }
 
 const currentId = ref(null);
@@ -423,6 +427,32 @@ function sanitizeRichHtml(html = '') {
   return sanitized;
 }
 
+function sanitizeRichDelta(delta) {
+  const cloned = JSON.parse(JSON.stringify(delta ?? { ops: [] }));
+  if (!Array.isArray(cloned.ops)) return { ops: [] };
+
+  cloned.ops = cloned.ops
+    .filter(op => {
+      const image = op?.insert?.image;
+      return !image || isSafeRichUrl(String(image), true);
+    })
+    .map(op => {
+      const link = op?.attributes?.link;
+      if (!link || isSafeRichUrl(String(link))) return op;
+
+      const { link: _link, ...attributes } = op.attributes;
+      const cleaned = { ...op };
+      if (Object.keys(attributes).length) {
+        cleaned.attributes = attributes;
+      } else {
+        delete cleaned.attributes;
+      }
+      return cleaned;
+    });
+
+  return cloned;
+}
+
 function splitRelationDescription(desc = '') {
   const [label = '', ...detailLines] = desc.replace(/\r\n/g, '\n').split('\n');
   return {
@@ -523,7 +553,7 @@ function queueSave() {
 function flush() {
   const node = current.value;
   if (node && editor) {
-    node.bodyDelta = JSON.stringify(editor.getContents());
+    node.bodyDelta = JSON.stringify(sanitizeRichDelta(editor.getContents()));
     node.bodyHtml = sanitizeRichHtml(editor.root.innerHTML);
     node.updatedAt = Date.now();
   }
@@ -609,7 +639,7 @@ function saveRel() {
   const from = modal.dir === 'in' ? modal.targetId : cid;
   const to = modal.dir === 'in' ? cid : modal.targetId;
   const desc = relEditor.getText().trim();
-  const descDelta = JSON.stringify(relEditor.getContents());
+  const descDelta = JSON.stringify(sanitizeRichDelta(relEditor.getContents()));
   const descHtml = sanitizeRichHtml(normalizeEditorHtml(relEditor.root.innerHTML));
   edges.value.push({ id: uid(), fromId: from, toId: to, desc, descDelta, descHtml, weight: modal.w });
   if (modal.dir === 'bi') {
