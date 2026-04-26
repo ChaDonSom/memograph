@@ -1,11 +1,8 @@
 <template>
 <div class="layout">
 
-  <!-- Sentinel used by IntersectionObserver to detect when sidebar is stuck -->
-  <div class="sidebar-sentinel" ref="sidebarSentinelEl" aria-hidden="true"></div>
-
   <!-- ── Sidebar ──────────────────────────────── -->
-  <div class="sidebar" :class="{ stuck: sidebarStuck, 'list-open': listOpen }">
+  <div class="sidebar" :class="{ 'list-open': listOpen }">
 
     <!-- Compact bar: one row with search + count + new-page (mobile, stuck only) -->
     <div class="s-compact-bar">
@@ -213,7 +210,7 @@
 </template>
 
 <script setup>
-import { computed, nextTick, onMounted, onUnmounted, reactive, ref, watch } from 'vue';
+import { computed, nextTick, onMounted, reactive, ref } from 'vue';
 import Quill from 'quill';
 import { loadGraph, saveGraph } from './services/graphRepository.js';
 
@@ -255,12 +252,9 @@ function persist() {
 
 const currentId = ref(null);
 const search = ref('');
-const sidebarStuck = ref(false);
 const listOpen = ref(false);
-const sidebarSentinelEl = ref(null);
 let editor = null;
 let saveTimer = null;
-let stuckObserver = null;
 
 const modal = reactive({
   on: false,
@@ -509,28 +503,11 @@ function exportData() {
 }
 
 // ── Mount ─────────────────────────────────────────────────────────────
-watch(sidebarStuck, (stuck) => {
-  if (!stuck) listOpen.value = false;
-});
-
 onMounted(async () => {
-  if (sidebarSentinelEl.value) {
-    stuckObserver = new IntersectionObserver(
-      ([entry]) => {
-        const stuck = !entry.isIntersecting;
-        if (sidebarStuck.value !== stuck) sidebarStuck.value = stuck;
-      },
-      { threshold: [0] }
-    );
-    stuckObserver.observe(sidebarSentinelEl.value);
-  }
   if (nodes.value.length) {
     const latest = [...nodes.value].sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0))[0];
     await loadNode(latest.id);
   }
 });
 
-onUnmounted(() => {
-  stuckObserver?.disconnect();
-});
 </script>
