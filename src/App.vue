@@ -230,7 +230,7 @@ const PREVIEW_HEIGHT_WITH_GUTTER = 230;
 // stores both Quill delta and preview HTML in localStorage.
 const MAX_DATA_IMAGE_URL_LENGTH = 1_500_000;
 const MAX_SANITIZED_HTML_CACHE_ENTRIES = 200;
-const UPLOAD_IMAGE_MAX_EDGE_LENGTHS = [1600, 1200, 900, 600];
+const UPLOAD_IMAGE_MAX_EDGE_LENGTH_ATTEMPTS = [1600, 1200, 900, 600];
 // canvas.toDataURL() quality values are 0–1 and only affect lossy formats.
 const UPLOAD_IMAGE_QUALITIES = [0.82, 0.7, 0.6];
 
@@ -359,6 +359,9 @@ function loadImage(src) {
   });
 }
 
+/**
+ * Resizes an image so its longest edge fits maxEdgeLength and returns a data URL.
+ */
 function imageToDataUrl(image, maxEdgeLength, type = 'image/jpeg', imageQuality) {
   const scale = Math.min(1, maxEdgeLength / Math.max(image.naturalWidth, image.naturalHeight));
   const canvas = document.createElement('canvas');
@@ -367,10 +370,11 @@ function imageToDataUrl(image, maxEdgeLength, type = 'image/jpeg', imageQuality)
 
   const ctx = canvas.getContext('2d');
   if (!ctx) {
-    console.warn('Unable to resize image upload because this browser could not create a canvas context.');
+    console.warn('Unable to resize image upload because this browser could not create a canvas context. Try another browser if image insertion fails.');
     return '';
   }
   if (type === 'image/jpeg') {
+    // JPEG has no transparency, so use white instead of the browser default black.
     ctx.fillStyle = '#ffffff';
     ctx.fillRect(0, 0, canvas.width, canvas.height);
   }
@@ -403,12 +407,15 @@ function isSafeRichUrl(value, allowDataImage = false) {
   }
 }
 
+/**
+ * Tries progressively smaller image sizes/qualities until the data URL can be stored.
+ */
 async function prepareImageUpload(file) {
   const original = await readFileAsDataUrl(file);
   if (isSafeRichUrl(original, true)) return original;
 
   const image = await loadImage(original);
-  for (const maxEdgeLength of UPLOAD_IMAGE_MAX_EDGE_LENGTHS) {
+  for (const maxEdgeLength of UPLOAD_IMAGE_MAX_EDGE_LENGTH_ATTEMPTS) {
     if (file.type === 'image/png') {
       // PNG is lossless, so retrying at smaller dimensions is the only size lever.
       const png = imageToDataUrl(image, maxEdgeLength, 'image/png');
@@ -428,7 +435,7 @@ async function prepareImageUpload(file) {
 async function handleImageUpload(quill, range, files) {
   const images = (await Promise.all(
     Array.from(files, file => prepareImageUpload(file).catch(error => {
-      console.warn('Unable to prepare image upload.', error);
+      console.warn(`Unable to prepare image upload for ${file.name || file.type || 'selected file'}.`, error);
       return '';
     }))
   )).filter(Boolean);
@@ -444,6 +451,9 @@ async function handleImageUpload(quill, range, files) {
   quill.setSelection(insertAt, 0, 'silent');
 }
 
+/**
+ * Quill uploader handler; Quill provides the uploader module as `this`.
+ */
 function imageUploadHandler(range, files) {
   // Quill calls uploader handlers with the uploader module as `this`.
   if (!this?.quill) return Promise.resolve();
