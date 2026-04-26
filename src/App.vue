@@ -359,7 +359,7 @@ function loadImage(src) {
   });
 }
 
-function imageToDataUrl(image, maxEdgeLength, type = 'image/jpeg', imageQuality = UPLOAD_IMAGE_QUALITIES[0]) {
+function imageToDataUrl(image, maxEdgeLength, type = 'image/jpeg', imageQuality) {
   const scale = Math.min(1, maxEdgeLength / Math.max(image.naturalWidth, image.naturalHeight));
   const canvas = document.createElement('canvas');
   canvas.width = Math.max(1, Math.round(image.naturalWidth * scale));
@@ -376,7 +376,7 @@ function imageToDataUrl(image, maxEdgeLength, type = 'image/jpeg', imageQuality 
   }
   ctx.drawImage(image, 0, 0, canvas.width, canvas.height);
   return type === 'image/jpeg'
-    ? canvas.toDataURL(type, imageQuality)
+    ? canvas.toDataURL(type, imageQuality ?? UPLOAD_IMAGE_QUALITIES[0])
     : canvas.toDataURL(type);
 }
 
@@ -437,10 +437,10 @@ async function handleImageUpload(quill, range, files) {
 
   quill.deleteText(range.index, range.length, 'user');
   let insertAt = range.index;
-  images.forEach(imageDataUrl => {
+  for (const imageDataUrl of images) {
     quill.insertEmbed(insertAt, 'image', imageDataUrl, 'user');
-    insertAt += 1;
-  });
+    insertAt++;
+  }
   quill.setSelection(insertAt, 0, 'silent');
 }
 
