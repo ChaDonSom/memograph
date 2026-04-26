@@ -420,6 +420,7 @@ body {
 .empty-icon { font-size: 44px; opacity: .25; }
 .empty h2 { font-size: 18px; font-weight: 600; color: var(--muted); }
 .empty p { font-size: 13px; color: var(--dim); max-width: 300px; line-height: 1.6; }
+.empty-create { margin-top: 4px; }
 
 /* ── Page actions bar ──────────────────────────── */
 .page-actions { display: flex; gap: 8px; justify-content: flex-end; }
