@@ -226,6 +226,8 @@ const MS_PER_DAY = 86_400_000;
 const PREVIEW_WIDTH = 300;
 const PREVIEW_GUTTER = 18;
 const PREVIEW_HEIGHT_WITH_GUTTER = 230;
+const MAX_DATA_IMAGE_URL_LENGTH = 5_000_000;
+const MAX_SANITIZED_HTML_CACHE_ENTRIES = 200;
 
 // Score = explicit weight (dominant) + visit popularity + recency decay.
 // This determines the ranking order of relation cards on each page.
@@ -282,6 +284,7 @@ const RICH_ALLOWED_ATTRS = {
   LI: new Set(['data-list']),
   SPAN: new Set(['contenteditable']),
 };
+const sanitizedHtmlCache = new Map();
 
 const modal = reactive({
   on: false,
@@ -332,7 +335,7 @@ function normalizeEditorHtml(html = '') {
 function isSafeRichUrl(value, allowDataImage = false) {
   const trimmed = value.trim();
   if (allowDataImage && /^data:image\/(png|jpe?g|gif|webp);base64,/i.test(trimmed)) {
-    return true;
+    return trimmed.length <= MAX_DATA_IMAGE_URL_LENGTH;
   }
 
   try {
@@ -344,6 +347,8 @@ function isSafeRichUrl(value, allowDataImage = false) {
 }
 
 function sanitizeRichHtml(html = '') {
+  if (sanitizedHtmlCache.has(html)) return sanitizedHtmlCache.get(html);
+
   const template = document.createElement('template');
   template.innerHTML = html;
 
@@ -393,7 +398,12 @@ function sanitizeRichHtml(html = '') {
     cleanNode(current);
   }
 
-  return template.innerHTML;
+  const sanitized = template.innerHTML;
+  if (sanitizedHtmlCache.size >= MAX_SANITIZED_HTML_CACHE_ENTRIES) {
+    sanitizedHtmlCache.clear();
+  }
+  sanitizedHtmlCache.set(html, sanitized);
+  return sanitized;
 }
 
 function splitRelationDescription(desc = '') {
