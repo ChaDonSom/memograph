@@ -226,6 +226,7 @@ const MS_PER_DAY = 86_400_000;
 const PREVIEW_WIDTH = 300;
 const PREVIEW_GUTTER = 18;
 const PREVIEW_HEIGHT_WITH_GUTTER = 230;
+// Keep embedded data images below roughly 5 MB to avoid oversized localStorage records and slow renders.
 const MAX_DATA_IMAGE_URL_LENGTH = 5_000_000;
 const MAX_SANITIZED_HTML_CACHE_ENTRIES = 200;
 
@@ -347,7 +348,12 @@ function isSafeRichUrl(value, allowDataImage = false) {
 }
 
 function sanitizeRichHtml(html = '') {
-  if (sanitizedHtmlCache.has(html)) return sanitizedHtmlCache.get(html);
+  if (sanitizedHtmlCache.has(html)) {
+    const cached = sanitizedHtmlCache.get(html);
+    sanitizedHtmlCache.delete(html);
+    sanitizedHtmlCache.set(html, cached);
+    return cached;
+  }
 
   const template = document.createElement('template');
   template.innerHTML = html;
@@ -356,19 +362,20 @@ function sanitizeRichHtml(html = '') {
     if (node.nodeType !== Node.ELEMENT_NODE) return;
 
     const element = node;
+    if (['SCRIPT', 'STYLE'].includes(element.tagName)) {
+      element.remove();
+      return;
+    }
+
     if (!RICH_ALLOWED_TAGS.has(element.tagName)) {
-      if (['SCRIPT', 'STYLE'].includes(element.tagName)) {
-        element.remove();
-      } else {
-        element.replaceWith(...element.childNodes);
-      }
+      element.replaceWith(...element.childNodes);
       return;
     }
 
     for (const attr of [...element.attributes]) {
       const allowedForTag = RICH_ALLOWED_ATTRS[element.tagName] ?? new Set();
       const isAllowed = RICH_GLOBAL_ATTRS.has(attr.name) || allowedForTag.has(attr.name);
-      if (!isAllowed || attr.name.startsWith('on')) {
+      if (!isAllowed || /^on/i.test(attr.name)) {
         element.removeAttribute(attr.name);
       }
     }
@@ -400,7 +407,7 @@ function sanitizeRichHtml(html = '') {
 
   const sanitized = template.innerHTML;
   if (sanitizedHtmlCache.size >= MAX_SANITIZED_HTML_CACHE_ENTRIES) {
-    sanitizedHtmlCache.clear();
+    sanitizedHtmlCache.delete(sanitizedHtmlCache.keys().next().value);
   }
   sanitizedHtmlCache.set(html, sanitized);
   return sanitized;
