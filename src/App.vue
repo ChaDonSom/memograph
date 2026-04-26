@@ -230,6 +230,8 @@ const PREVIEW_HEIGHT_WITH_GUTTER = 230;
 // stores both Quill delta and preview HTML in localStorage.
 const MAX_DATA_IMAGE_URL_LENGTH = 1_500_000;
 const MAX_SANITIZED_HTML_CACHE_ENTRIES = 200;
+const UPLOAD_IMAGE_MAX_DIMENSIONS = [1600, 1200, 900, 600];
+const UPLOAD_IMAGE_QUALITIES = [0.82, 0.7, 0.6];
 
 // Score = explicit weight (dominant) + visit popularity + recency decay.
 // This determines the ranking order of relation cards on each page.
@@ -338,6 +340,39 @@ function normalizeEditorHtml(html = '') {
   return html === '<p><br></p>' ? '' : html;
 }
 
+function readFileAsDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || ''));
+    reader.onerror = () => reject(reader.error);
+    reader.readAsDataURL(file);
+  });
+}
+
+function loadImage(src) {
+  return new Promise((resolve, reject) => {
+    const image = new Image();
+    image.onload = () => resolve(image);
+    image.onerror = reject;
+    image.src = src;
+  });
+}
+
+function imageToDataUrl(image, maxDimension, type = 'image/jpeg', quality) {
+  const scale = Math.min(1, maxDimension / Math.max(image.naturalWidth, image.naturalHeight));
+  const canvas = document.createElement('canvas');
+  canvas.width = Math.max(1, Math.round(image.naturalWidth * scale));
+  canvas.height = Math.max(1, Math.round(image.naturalHeight * scale));
+
+  const ctx = canvas.getContext('2d');
+  if (type === 'image/jpeg') {
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+  }
+  ctx.drawImage(image, 0, 0, canvas.width, canvas.height);
+  return canvas.toDataURL(type, quality);
+}
+
 function isSafeRichUrl(value, allowDataImage = false) {
   const trimmed = value.trim();
   if (allowDataImage && /^data:image\/(png|jpe?g|gif|webp);base64,/i.test(trimmed)) {
@@ -359,6 +394,43 @@ function isSafeRichUrl(value, allowDataImage = false) {
   } catch {
     return false;
   }
+}
+
+async function prepareImageUpload(file) {
+  const original = await readFileAsDataUrl(file);
+  if (isSafeRichUrl(original, true)) return original;
+
+  const image = await loadImage(original);
+  for (const maxDimension of UPLOAD_IMAGE_MAX_DIMENSIONS) {
+    if (file.type === 'image/png') {
+      const png = imageToDataUrl(image, maxDimension, 'image/png');
+      if (isSafeRichUrl(png, true)) return png;
+    }
+
+    for (const quality of UPLOAD_IMAGE_QUALITIES) {
+      const jpeg = imageToDataUrl(image, maxDimension, 'image/jpeg', quality);
+      if (isSafeRichUrl(jpeg, true)) return jpeg;
+    }
+  }
+
+  return '';
+}
+
+async function handleImageUpload(range, files) {
+  const images = (await Promise.all(
+    Array.from(files, file => prepareImageUpload(file).catch(error => {
+      console.warn('Unable to prepare image upload.', error);
+      return '';
+    }))
+  )).filter(Boolean);
+
+  if (!images.length) return;
+
+  this.quill.deleteText(range.index, range.length, 'user');
+  images.forEach((image, index) => {
+    this.quill.insertEmbed(range.index + index, 'image', image, 'user');
+  });
+  this.quill.setSelection(range.index + images.length, 0, 'silent');
 }
 
 function sanitizeRichHtml(html = '') {
@@ -522,7 +594,10 @@ function initEditor() {
     theme: 'snow',
     placeholder: 'Write something about this page…',
     modules: {
-      toolbar: RICH_CONTENT_TOOLBAR
+      toolbar: RICH_CONTENT_TOOLBAR,
+      uploader: {
+        handler: handleImageUpload,
+      },
     },
   });
   const node = current.value;
@@ -542,7 +617,10 @@ function initRelationEditor() {
       theme: 'snow',
       placeholder: 'Describe this relationship. Images are supported.',
       modules: {
-        toolbar: RICH_CONTENT_TOOLBAR
+        toolbar: RICH_CONTENT_TOOLBAR,
+        uploader: {
+          handler: handleImageUpload,
+        },
       },
     });
     modal.editorError = '';
