@@ -316,10 +316,8 @@ body {
   color: var(--muted);
   font-style: italic;
   line-height: 1.4;
-  overflow: hidden;
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
 }
 
 .rel-title {
@@ -472,6 +470,61 @@ body {
 .field textarea:focus { border-color: var(--accent); }
 .field textarea { resize: vertical; min-height: 72px; }
 .field select option { background: var(--surface2); }
+
+.target-picker {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.target-selected {
+  color: var(--accent);
+  font-size: 12px;
+}
+
+.target-results {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  max-height: 154px;
+  overflow-y: auto;
+  background: var(--surface2);
+}
+
+.target-option,
+.target-create {
+  width: 100%;
+  border: none;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 13px;
+  text-align: left;
+}
+
+.target-option {
+  display: block;
+  padding: 8px 11px;
+  background: transparent;
+  color: var(--muted);
+}
+
+.target-option:hover,
+.target-option.selected {
+  background: var(--accent-d);
+  color: var(--accent);
+}
+
+.target-create {
+  padding: 8px 11px;
+  border: 1px dashed var(--border2);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--accent);
+}
+
+.target-create:hover {
+  background: var(--accent-g);
+  border-color: var(--accent);
+}
 
 .w-track { display: flex; align-items: center; gap: 14px; }
 .w-track input[type=range] {

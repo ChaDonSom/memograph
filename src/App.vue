@@ -134,12 +134,35 @@
 
     <div class="field">
       <label>Target page</label>
-      <select v-model="modal.targetId">
-        <option value="">— select a page —</option>
-        <option v-for="n in otherNodes" :key="n.id" :value="n.id">
-          {{ n.title || '(untitled)' }}
-        </option>
-      </select>
+      <div class="target-picker">
+        <input
+          v-model="modal.targetSearch"
+          placeholder="Search pages or type a new title..."
+          @input="modal.targetId = ''"
+        />
+        <div class="target-selected" v-if="selectedModalTarget">
+          Selected: {{ selectedModalTarget.title || '(untitled)' }}
+        </div>
+        <div class="target-results" v-if="modalTargetOptions.length">
+          <button
+            type="button"
+            v-for="n in modalTargetOptions"
+            :key="n.id"
+            class="target-option"
+            :class="{ selected: n.id === modal.targetId }"
+            @click="selectModalTarget(n)"
+          >
+            {{ n.title || '(untitled)' }}
+          </button>
+        </div>
+        <button
+          type="button"
+          class="target-create"
+          @click="createModalTarget"
+        >
+          + Create {{ modalTargetCreateLabel }}
+        </button>
+      </div>
     </div>
 
     <div class="field">
@@ -214,7 +237,7 @@ const search    = ref('');
 let Q           = null;   // Quill instance (not reactive)
 let saveTimer   = null;
 
-const modal = reactive({ on: false, targetId: '', desc: '', dir: 'out', w: 5 });
+const modal = reactive({ on: false, targetId: '', targetSearch: '', desc: '', dir: 'out', w: 5 });
 const prev  = reactive({ on: false, title: '', html: '', x: 0, y: 0 });
 
 // ── Derived ───────────────────────────────────────────────────────────
@@ -231,6 +254,22 @@ const filteredNodes = computed(() =>
 const otherNodes = computed(() =>
   nodes.value.filter(n => n.id !== currentId.value)
 );
+
+const selectedModalTarget = computed(() =>
+  otherNodes.value.find(n => n.id === modal.targetId) ?? null
+);
+
+const modalTargetOptions = computed(() => {
+  const query = modal.targetSearch.trim().toLowerCase();
+  return otherNodes.value
+    .filter(n => !query || (n.title || '').toLowerCase().includes(query))
+    .sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+});
+
+const modalTargetCreateLabel = computed(() => {
+  const title = modal.targetSearch.trim();
+  return title ? `"${title}"` : 'untitled page';
+});
 
 const ranked = computed(() => {
   if (!currentId.value) return [];
@@ -310,15 +349,20 @@ async function loadNode(id) {
   initQ();
 }
 
-async function createNode() {
+function createGraphNode(title = '') {
   const node = {
-    id: uid(), title: '',
+    id: uid(), title,
     bodyDelta: '', bodyHtml: '',
     visits: 0,
     createdAt: Date.now(), updatedAt: Date.now(),
   };
   nodes.value.unshift(node);
   persist();
+  return node;
+}
+
+async function createNode() {
+  const node = createGraphNode();
   await loadNode(node.id);
 }
 
@@ -334,7 +378,17 @@ function deletePage() {
 
 // ── Edges ─────────────────────────────────────────────────────────────
 function openModal() {
-  Object.assign(modal, { on: true, targetId: '', desc: '', dir: 'out', w: 5 });
+  Object.assign(modal, { on: true, targetId: '', targetSearch: '', desc: '', dir: 'out', w: 5 });
+}
+
+function selectModalTarget(node) {
+  modal.targetId = node.id;
+  modal.targetSearch = node.title || '';
+}
+
+function createModalTarget() {
+  const node = createGraphNode(modal.targetSearch.trim());
+  selectModalTarget(node);
 }
 
 function saveRel() {
