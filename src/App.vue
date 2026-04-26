@@ -92,11 +92,17 @@
             <template v-if="r.dir.startsWith('←')">
               <div class="rel-title">{{ r.title }}</div>
               <div class="rel-rich" v-if="r.relationHtml" v-html="r.relationHtml"></div>
+              <template v-else>
+                <div class="rel-label-text" v-if="r.label">{{ r.label }}</div>
+                <div class="rel-detail" v-if="r.detail">{{ r.detail }}</div>
+              </template>
             </template>
             <!-- Outgoing: relation label is the predicate, target title follows -->
             <template v-else>
               <div class="rel-rich" v-if="r.relationHtml" v-html="r.relationHtml"></div>
+              <div class="rel-label-text" v-else-if="r.label">{{ r.label }}</div>
               <div class="rel-title">{{ r.title }}</div>
+              <div class="rel-detail" v-if="!r.relationHtml && r.detail">{{ r.detail }}</div>
             </template>
             <div class="rel-foot">
               <span class="rel-score">P={{ r.score.toFixed(1) }}</span>
@@ -305,31 +311,16 @@ const modalTargetCreateLabel = computed(() => {
   return title ? `"${title}"` : 'untitled page';
 });
 
-function escapeHtml(value = '') {
-  return value.replace(/[&<>"']/g, char => ({
-    '&': '&amp;',
-    '<': '&lt;',
-    '>': '&gt;',
-    '"': '&quot;',
-    "'": '&#39;',
-  }[char]));
-}
-
-function plainTextToHtml(desc = '') {
-  const normalized = desc.replace(/\r\n/g, '\n').trim();
-  if (!normalized) return '';
-  return normalized
-    .split('\n')
-    .map(line => line ? `<p>${escapeHtml(line)}</p>` : '<p><br></p>')
-    .join('');
-}
-
 function normalizeEditorHtml(html = '') {
   return html === '<p><br></p>' ? '' : html;
 }
 
-function getRelationHtml(edge) {
-  return normalizeEditorHtml(edge.descHtml || '') || plainTextToHtml(edge.desc);
+function splitRelationDescription(desc = '') {
+  const [label = '', ...detailLines] = desc.replace(/\r\n/g, '\n').split('\n');
+  return {
+    label: label.trim(),
+    detail: detailLines.join('\n').replace(/\s+$/, ''),
+  };
 }
 
 function findNode(id) {
@@ -353,11 +344,15 @@ const ranked = computed(() => {
     if (!tid) continue;
     const t = findNode(tid);
     if (!t) continue;
+    const relationHtml = normalizeEditorHtml(e.descHtml || '');
+    const relationText = relationHtml ? { label: '', detail: '' } : splitRelationDescription(e.desc);
     out.push({
       edgeId: e.id,
       targetId: tid,
       title: t.title || '(untitled)',
-      relationHtml: getRelationHtml(e),
+      label: relationText.label,
+      detail: relationText.detail,
+      relationHtml,
       dir,
       score: pScore(e, t),
     });
