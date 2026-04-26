@@ -2,7 +2,7 @@
 <div class="layout">
 
   <!-- ── Sidebar ──────────────────────────────── -->
-  <div class="sidebar" :class="{ 'list-open': listOpen }">
+  <div class="sidebar" ref="sidebarEl" :class="{ 'list-open': listOpen }">
 
     <!-- Compact bar: one row with search + count + new-page (mobile, stuck only) -->
     <div class="s-compact-bar">
@@ -210,7 +210,7 @@
 </template>
 
 <script setup>
-import { computed, nextTick, onMounted, reactive, ref } from 'vue';
+import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue';
 import Quill from 'quill';
 import { loadGraph, saveGraph } from './services/graphRepository.js';
 
@@ -253,6 +253,7 @@ function persist() {
 const currentId = ref(null);
 const search = ref('');
 const listOpen = ref(false);
+const sidebarEl = ref(null);
 let editor = null;
 let saveTimer = null;
 
@@ -501,6 +502,18 @@ function exportData() {
   a.click();
   setTimeout(() => URL.revokeObjectURL(url), 0);
 }
+
+// ── Click-outside: close the pages overlay when tapping away ──────────
+watch(listOpen, (open) => {
+  if (!open) return;
+  function onPointerDown(e) {
+    if (sidebarEl.value && !sidebarEl.value.contains(e.target)) {
+      listOpen.value = false;
+      document.removeEventListener('pointerdown', onPointerDown);
+    }
+  }
+  document.addEventListener('pointerdown', onPointerDown);
+});
 
 // ── Mount ─────────────────────────────────────────────────────────────
 onMounted(async () => {
