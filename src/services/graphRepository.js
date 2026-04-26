@@ -4,12 +4,16 @@ function emptyGraph() {
   return { nodes: [], edges: [] };
 }
 
+function arrayOrEmpty(value) {
+  return Array.isArray(value) ? value : [];
+}
+
 function normalizeGraph(value) {
   if (!value || typeof value !== 'object') return emptyGraph();
 
   return {
-    nodes: Array.isArray(value.nodes) ? value.nodes : [],
-    edges: Array.isArray(value.edges) ? value.edges : [],
+    nodes: arrayOrEmpty(value.nodes),
+    edges: arrayOrEmpty(value.edges),
   };
 }
 

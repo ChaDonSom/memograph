@@ -112,7 +112,7 @@
       <div class="empty-icon">⬡</div>
       <h2>Memograph</h2>
       <p>A local knowledge graph. Create pages and connect them with typed, weighted relations. Relations are ranked by a priority function.</p>
-      <button class="btn btn-primary" style="margin-top:4px" @click="createNode">Create first page</button>
+      <button class="btn btn-primary empty-create" @click="createNode">Create first page</button>
     </div>
   </div>
 
@@ -130,7 +130,7 @@
 </div>
 
 <!-- ── Add relation modal ────────────────────── -->
-<div class="overlay" v-if="modal.on" @click.self="modal.on = false">
+<div class="overlay" v-if="modal.on" @click.self="closeModal">
   <div class="modal">
     <div class="modal-title">Add Relation</div>
 
@@ -193,7 +193,7 @@
     </div>
 
     <div class="modal-btns">
-      <button class="btn btn-ghost" @click="modal.on = false">Cancel</button>
+      <button class="btn btn-ghost" @click="closeModal">Cancel</button>
       <button class="btn btn-primary" @click="saveRel" :disabled="!modal.targetId">Save</button>
     </div>
   </div>
@@ -207,14 +207,21 @@ import { loadGraph, saveGraph } from './services/graphRepository.js';
 
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
 
+const DEFAULT_EDGE_WEIGHT = 5;
+const SAVE_DELAY_MS = 500;
+const MS_PER_DAY = 86_400_000;
+const PREVIEW_WIDTH = 300;
+const PREVIEW_GUTTER = 18;
+const PREVIEW_HEIGHT_WITH_GUTTER = 230;
+
 // Score = explicit weight (dominant) + visit popularity + recency decay.
 // This determines the ranking order of relation cards on each page.
 function pScore(edge, target) {
-  const w       = (edge.weight || 5) * 3;                          // weight 1-10
-  const pop     = Math.log2((target.visits || 0) + 1) * 2;          // visit popularity
-  const days    = (Date.now() - (target.updatedAt || 0)) / 86_400_000;
-  const recency = 8 * Math.exp(-days / 7);                          // decays over ~7 days
-  return w + pop + recency;
+  const weight = (edge.weight || DEFAULT_EDGE_WEIGHT) * 3;
+  const popularity = Math.log2((target.visits || 0) + 1) * 2;
+  const daysSinceUpdate = (Date.now() - (target.updatedAt || 0)) / MS_PER_DAY;
+  const recency = 8 * Math.exp(-daysSinceUpdate / 7);
+  return weight + popularity + recency;
 }
 
 function timeAgo(ts) {
@@ -227,24 +234,31 @@ function timeAgo(ts) {
 }
 
 const stored = loadGraph();
-const nodes  = ref(stored.nodes);
-const edges  = ref(stored.edges);
+const nodes = ref(stored.nodes);
+const edges = ref(stored.edges);
 
 function persist() {
   saveGraph(nodes.value, edges.value);
 }
 
 const currentId = ref(null);
-const search    = ref('');
-let Q           = null;   // Quill instance (not reactive)
-let saveTimer   = null;
+const search = ref('');
+let editor = null;
+let saveTimer = null;
 
-const modal = reactive({ on: false, targetId: '', targetSearch: '', desc: '', dir: 'out', w: 5 });
-const prev  = reactive({ on: false, title: '', html: '', x: 0, y: 0 });
+const modal = reactive({
+  on: false,
+  targetId: '',
+  targetSearch: '',
+  desc: '',
+  dir: 'out',
+  w: DEFAULT_EDGE_WEIGHT,
+});
+const prev = reactive({ on: false, title: '', html: '', x: 0, y: 0 });
 
 // ── Derived ───────────────────────────────────────────────────────────
 const current = computed(() =>
-  nodes.value.find(n => n.id === currentId.value) ?? null
+  findNode(currentId.value)
 );
 
 const filteredNodes = computed(() =>
@@ -281,40 +295,50 @@ function splitRelationDescription(desc = '') {
   };
 }
 
+function findNode(id) {
+  return nodes.value.find(n => n.id === id) ?? null;
+}
+
 const ranked = computed(() => {
   if (!currentId.value) return [];
   const cid = currentId.value;
   const out = [];
   for (const e of edges.value) {
-    let tid = null, dir = '';
-    if (e.fromId === cid)      { tid = e.toId;   dir = '→ outgoing'; }
-    else if (e.toId === cid)   { tid = e.fromId; dir = '← incoming'; }
+    let tid = null;
+    let dir = '';
+    if (e.fromId === cid) {
+      tid = e.toId;
+      dir = '→ outgoing';
+    } else if (e.toId === cid) {
+      tid = e.fromId;
+      dir = '← incoming';
+    }
     if (!tid) continue;
-    const t = nodes.value.find(n => n.id === tid);
+    const t = findNode(tid);
     if (!t) continue;
     const relationText = splitRelationDescription(e.desc);
     out.push({
-      edgeId:   e.id,
+      edgeId: e.id,
       targetId: tid,
-      title:    t.title || '(untitled)',
-      label:    relationText.label,
-      detail:   relationText.detail,
+      title: t.title || '(untitled)',
+      label: relationText.label,
+      detail: relationText.detail,
       dir,
-      score:    pScore(e, t),
+      score: pScore(e, t),
     });
   }
   return out.sort((a, b) => b.score - a.score);
 });
 
 // ── Quill ─────────────────────────────────────────────────────────────
-function initQ() {
+function initEditor() {
   // Quill injects its toolbar as a sibling inside .editor-wrap, not inside
   // #qeditor itself. Clearing only #qeditor leaves orphaned toolbars behind.
   // Rebuild the whole wrapper so every init starts from a clean slate.
   const wrap = document.querySelector('.editor-wrap');
   if (!wrap) return;
   wrap.innerHTML = '<div id="qeditor"></div>';
-  Q = new Quill('#qeditor', {
+  editor = new Quill('#qeditor', {
     theme: 'snow',
     placeholder: 'Write something about this page…',
     modules: {
@@ -326,27 +350,30 @@ function initQ() {
         ['link'],
         ['clean'],
       ]
-    }
+    },
   });
   const node = current.value;
   if (node?.bodyDelta) {
-    try { Q.setContents(JSON.parse(node.bodyDelta)); }
-    catch { Q.setText(node.bodyDelta); }
+    try {
+      editor.setContents(JSON.parse(node.bodyDelta));
+    } catch {
+      editor.setText(node.bodyDelta);
+    }
   }
-  Q.on('text-change', queueSave);
+  editor.on('text-change', queueSave);
 }
 
 function queueSave() {
   clearTimeout(saveTimer);
-  saveTimer = setTimeout(flush, 500);
+  saveTimer = setTimeout(flush, SAVE_DELAY_MS);
 }
 
 function flush() {
   const node = current.value;
-  if (node && Q) {
-    node.bodyDelta  = JSON.stringify(Q.getContents());
-    node.bodyHtml   = Q.root.innerHTML;
-    node.updatedAt  = Date.now();
+  if (node && editor) {
+    node.bodyDelta = JSON.stringify(editor.getContents());
+    node.bodyHtml = editor.root.innerHTML;
+    node.updatedAt = Date.now();
   }
   persist();
 }
@@ -354,19 +381,22 @@ function flush() {
 // ── Node CRUD ─────────────────────────────────────────────────────────
 async function loadNode(id) {
   flush();
-  const node = nodes.value.find(n => n.id === id);
+  const node = findNode(id);
   if (node) node.visits = (node.visits || 0) + 1;
   currentId.value = id;
   await nextTick();
-  initQ();
+  initEditor();
 }
 
 function createGraphNode(title = '') {
   const node = {
-    id: uid(), title,
-    bodyDelta: '', bodyHtml: '',
+    id: uid(),
+    title,
+    bodyDelta: '',
+    bodyHtml: '',
     visits: 0,
-    createdAt: Date.now(), updatedAt: Date.now(),
+    createdAt: Date.now(),
+    updatedAt: Date.now(),
   };
   nodes.value.unshift(node);
   persist();
@@ -381,16 +411,27 @@ async function createNode() {
 function deletePage() {
   const id = currentId.value;
   if (!id || !confirm('Delete this page and all its relations?')) return;
-  nodes.value  = nodes.value.filter(n => n.id !== id);
-  edges.value  = edges.value.filter(e => e.fromId !== id && e.toId !== id);
+  nodes.value = nodes.value.filter(n => n.id !== id);
+  edges.value = edges.value.filter(e => e.fromId !== id && e.toId !== id);
   currentId.value = null;
-  Q = null;
+  editor = null;
   persist();
 }
 
 // ── Edges ─────────────────────────────────────────────────────────────
 function openModal() {
-  Object.assign(modal, { on: true, targetId: '', targetSearch: '', desc: '', dir: 'out', w: 5 });
+  Object.assign(modal, {
+    on: true,
+    targetId: '',
+    targetSearch: '',
+    desc: '',
+    dir: 'out',
+    w: DEFAULT_EDGE_WEIGHT,
+  });
+}
+
+function closeModal() {
+  modal.on = false;
 }
 
 function selectModalTarget(node) {
@@ -405,9 +446,9 @@ function createModalTarget() {
 
 function saveRel() {
   if (!modal.targetId) return;
-  const cid  = currentId.value;
+  const cid = currentId.value;
   const from = modal.dir === 'in' ? modal.targetId : cid;
-  const to   = modal.dir === 'in' ? cid : modal.targetId;
+  const to = modal.dir === 'in' ? cid : modal.targetId;
   edges.value.push({ id: uid(), fromId: from, toId: to, desc: modal.desc, weight: modal.w });
   if (modal.dir === 'bi') {
     edges.value.push({ id: uid(), fromId: to, toId: from, desc: modal.desc, weight: modal.w });
@@ -423,14 +464,13 @@ function dropEdge(eid) {
 
 // ── Hover preview ─────────────────────────────────────────────────────
 function showPrev(evt, tid) {
-  const t = nodes.value.find(n => n.id === tid);
+  const t = findNode(tid);
   if (!t) return;
   const rect = evt.currentTarget.getBoundingClientRect();
-  // Position to the right; clamp so it doesn't overflow viewport
-  const x = Math.min(rect.right + 12, window.innerWidth - 318);
-  const y = Math.max(8, Math.min(rect.top, window.innerHeight - 230));
+  const x = Math.min(rect.right + 12, window.innerWidth - PREVIEW_WIDTH - PREVIEW_GUTTER);
+  const y = Math.max(8, Math.min(rect.top, window.innerHeight - PREVIEW_HEIGHT_WITH_GUTTER));
   prev.title = t.title || '(untitled)';
-  prev.html  = t.bodyHtml || '<em style="opacity:.45">No content yet.</em>';
+  prev.html = t.bodyHtml || '<em style="opacity:.45">No content yet.</em>';
   prev.x = x;
   prev.y = y;
   prev.on = true;
@@ -444,10 +484,12 @@ function exportData() {
     [JSON.stringify({ nodes: nodes.value, edges: edges.value }, null, 2)],
     { type: 'application/json' }
   );
+  const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
-  a.href = URL.createObjectURL(blob);
+  a.href = url;
   a.download = 'memograph.json';
   a.click();
+  URL.revokeObjectURL(url);
 }
 
 // ── Mount ─────────────────────────────────────────────────────────────
