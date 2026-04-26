@@ -365,7 +365,10 @@ function imageToDataUrl(image, maxDimension, type = 'image/jpeg', quality) {
   canvas.height = Math.max(1, Math.round(image.naturalHeight * scale));
 
   const ctx = canvas.getContext('2d');
-  if (!ctx) return '';
+  if (!ctx) {
+    console.warn('Unable to resize image upload because a canvas context could not be created.');
+    return '';
+  }
   if (type === 'image/jpeg') {
     ctx.fillStyle = '#ffffff';
     ctx.fillRect(0, 0, canvas.width, canvas.height);
@@ -435,7 +438,7 @@ async function handleImageUpload(quill, range, files) {
 }
 
 function uploadImages(range, files) {
-  handleImageUpload(this.quill, range, files);
+  return handleImageUpload(this.quill, range, files);
 }
 
 function sanitizeRichHtml(html = '') {
