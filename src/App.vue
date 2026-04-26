@@ -226,7 +226,8 @@ const MS_PER_DAY = 86_400_000;
 const PREVIEW_WIDTH = 300;
 const PREVIEW_GUTTER = 18;
 const PREVIEW_HEIGHT_WITH_GUTTER = 230;
-// Keep embedded data images below roughly 5 MB to avoid oversized localStorage records and slow renders.
+// Keep embedded data images below a 5,000,000-character URL budget (~3.75 MB raw image)
+// to avoid oversized localStorage records and slow renders.
 const MAX_DATA_IMAGE_URL_LENGTH = 5_000_000;
 const MAX_SANITIZED_HTML_CACHE_ENTRIES = 200;
 
@@ -336,7 +337,16 @@ function normalizeEditorHtml(html = '') {
 function isSafeRichUrl(value, allowDataImage = false) {
   const trimmed = value.trim();
   if (allowDataImage && /^data:image\/(png|jpe?g|gif|webp);base64,/i.test(trimmed)) {
-    return trimmed.length <= MAX_DATA_IMAGE_URL_LENGTH;
+    if (trimmed.length > MAX_DATA_IMAGE_URL_LENGTH) return false;
+    const commaIndex = trimmed.indexOf(',');
+    const data = trimmed.slice(commaIndex + 1);
+    if (!data || data.length % 4 !== 0 || !/^[a-z0-9+/]+={0,2}$/i.test(data)) return false;
+    try {
+      atob(data);
+      return true;
+    } catch {
+      return false;
+    }
   }
 
   try {
@@ -500,7 +510,7 @@ function initRelationEditor() {
     modal.editorError = '';
   } catch (error) {
     relEditor = null;
-    modal.editorError = 'Unable to initialize the relationship editor. Close this dialog and try again.';
+    modal.editorError = 'Unable to initialize the relationship editor. Close this dialog and try again, or refresh the page if the problem continues.';
     console.warn(modal.editorError, error);
   }
 }
@@ -592,7 +602,7 @@ function createModalTarget() {
 function saveRel() {
   if (!modal.targetId) return;
   if (!relEditor) {
-    modal.editorError = 'Unable to save because the relationship editor is unavailable. Close this dialog and try again.';
+    modal.editorError = 'Unable to save because the relationship editor is unavailable. Close this dialog and try again, or refresh the page if the problem continues.';
     return;
   }
   const cid = currentId.value;
