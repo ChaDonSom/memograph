@@ -1,8 +1,20 @@
 <template>
 <div class="layout">
 
+  <!-- Sentinel used by IntersectionObserver to detect when sidebar is stuck -->
+  <div class="sidebar-sentinel" ref="sidebarSentinelEl" aria-hidden="true"></div>
+
   <!-- ── Sidebar ──────────────────────────────── -->
   <div class="sidebar" :class="{ stuck: sidebarStuck, 'list-open': listOpen }">
+
+    <!-- Compact bar: one row with search + count + new-page (mobile, stuck only) -->
+    <div class="s-compact-bar">
+      <input v-model="search" placeholder="Search pages…" />
+      <button class="btn-icon" :class="{ active: listOpen }" title="Pages"
+              @click="listOpen = !listOpen">{{ nodes.length }}</button>
+      <button class="btn-icon" title="New Page" @click="createNode">+</button>
+    </div>
+
     <div class="s-head">
       <div class="brand">
         <svg width="13" height="13" viewBox="0 0 24 24" fill="none"
@@ -18,11 +30,6 @@
       <input v-model="search" placeholder="Search pages…" />
     </div>
 
-    <button class="s-list-toggle" @click="listOpen = !listOpen">
-      <span>{{ nodes.length }} pages</span>
-      <span class="s-list-toggle-arrow">{{ listOpen ? '▲' : '▼' }}</span>
-    </button>
-
     <div class="s-list">
       <div
         v-for="n in filteredNodes"
@@ -34,7 +41,7 @@
     </div>
 
     <div class="s-foot">
-      <button class="btn-new" title="New Page" @click="createNode">{{ sidebarStuck ? '+' : '+ New Page' }}</button>
+      <button class="btn-new" @click="createNode">+ New Page</button>
       <button class="btn-icon" title="Export JSON" @click="exportData">↓</button>
     </div>
   </div>
@@ -250,8 +257,10 @@ const currentId = ref(null);
 const search = ref('');
 const sidebarStuck = ref(false);
 const listOpen = ref(false);
+const sidebarSentinelEl = ref(null);
 let editor = null;
 let saveTimer = null;
+let stuckObserver = null;
 
 const modal = reactive({
   on: false,
@@ -500,17 +509,21 @@ function exportData() {
 }
 
 // ── Mount ─────────────────────────────────────────────────────────────
-function onScroll() {
-  const stuck = window.scrollY > 0;
-  if (sidebarStuck.value !== stuck) sidebarStuck.value = stuck;
-}
-
 watch(sidebarStuck, (stuck) => {
   if (!stuck) listOpen.value = false;
 });
 
 onMounted(async () => {
-  window.addEventListener('scroll', onScroll, { passive: true });
+  if (sidebarSentinelEl.value) {
+    stuckObserver = new IntersectionObserver(
+      ([entry]) => {
+        const stuck = !entry.isIntersecting;
+        if (sidebarStuck.value !== stuck) sidebarStuck.value = stuck;
+      },
+      { threshold: [0] }
+    );
+    stuckObserver.observe(sidebarSentinelEl.value);
+  }
   if (nodes.value.length) {
     const latest = [...nodes.value].sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0))[0];
     await loadNode(latest.id);
@@ -518,6 +531,6 @@ onMounted(async () => {
 });
 
 onUnmounted(() => {
-  window.removeEventListener('scroll', onScroll);
+  stuckObserver?.disconnect();
 });
 </script>

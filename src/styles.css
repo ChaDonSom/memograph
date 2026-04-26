@@ -146,8 +146,8 @@ body {
 }
 .btn-icon:hover { color: var(--text); border-color: var(--border2); }
 
-/* s-list-toggle only visible on mobile when stuck */
-.s-list-toggle { display: none; }
+/* s-compact-bar only visible on mobile when stuck */
+.s-compact-bar { display: none; }
 
 /* ── Main ──────────────────────────────────────── */
 .main { flex: 1; overflow: hidden; display: flex; flex-direction: column; min-width: 0; }
@@ -611,25 +611,49 @@ body {
     padding: 8px 10px;
   }
 
-  /* Pages list toggle button — shown when sidebar is stuck */
-  .sidebar.stuck .s-list-toggle {
+  /* When stuck: show compact bar; hide full sidebar sections */
+  .sidebar.stuck {
+    max-height: none;
+    overflow: visible; /* allow overlay list to extend below */
+  }
+
+  .sidebar.stuck .s-compact-bar {
     display: flex;
     align-items: center;
-    justify-content: space-between;
-    width: 100%;
-    padding: 6px 12px;
+    gap: 6px;
+    padding: 6px 10px;
+  }
+
+  .sidebar.stuck .s-compact-bar input {
+    flex: 1;
     background: var(--surface2);
-    border: none;
-    border-bottom: 1px solid var(--border);
-    color: var(--muted);
+    border: 1px solid var(--border);
+    color: var(--text);
+    border-radius: 6px;
+    padding: 6px 10px;
     font-size: 12.5px;
     font-family: inherit;
-    cursor: pointer;
-    transition: color 0.15s;
+    outline: none;
+    transition: border-color .15s;
   }
-  .sidebar.stuck .s-list-toggle:hover { color: var(--text); }
+  .sidebar.stuck .s-compact-bar input::placeholder { color: var(--dim); }
+  .sidebar.stuck .s-compact-bar input:focus { border-color: var(--accent); }
 
-  /* Collapse list when stuck; expand as overlay when list-open */
+  .sidebar.stuck .s-compact-bar .btn-icon {
+    padding: 6px 9px;
+    font-size: 13px;
+  }
+  .sidebar.stuck .s-compact-bar .btn-icon.active {
+    color: var(--accent);
+    border-color: var(--accent);
+    background: var(--accent-d);
+  }
+
+  .sidebar.stuck .s-head { display: none; }
+  .sidebar.stuck .s-search { display: none; }
+  .sidebar.stuck .s-foot { display: none; }
+
+  /* Collapse list when stuck; drop down as overlay when list-open */
   .sidebar.stuck .s-list {
     max-height: 0;
     overflow: hidden;
@@ -645,14 +669,6 @@ body {
     border-bottom: 1px solid var(--border);
     box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
     z-index: 20;
-  }
-
-  /* Compact "New Page" to a "+" icon button when stuck */
-  .sidebar.stuck .btn-new {
-    flex: none;
-    width: 36px;
-    padding: 8px 0;
-    font-size: 18px;
   }
 
   .s-list {
