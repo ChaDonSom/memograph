@@ -231,6 +231,7 @@ const PREVIEW_HEIGHT_WITH_GUTTER = 230;
 const MAX_DATA_IMAGE_URL_LENGTH = 1_500_000;
 const MAX_SANITIZED_HTML_CACHE_ENTRIES = 200;
 const UPLOAD_IMAGE_MAX_DIMENSIONS = [1600, 1200, 900, 600];
+// canvas.toDataURL() quality values are 0–1 and only affect lossy formats.
 const UPLOAD_IMAGE_QUALITIES = [0.82, 0.7, 0.6];
 
 // Score = explicit weight (dominant) + visit popularity + recency decay.
@@ -358,7 +359,7 @@ function loadImage(src) {
   });
 }
 
-function imageToDataUrl(image, maxEdgeLength, type = 'image/jpeg', quality) {
+function imageToDataUrl(image, maxEdgeLength, type = 'image/jpeg', imageQuality) {
   const scale = Math.min(1, maxEdgeLength / Math.max(image.naturalWidth, image.naturalHeight));
   const canvas = document.createElement('canvas');
   canvas.width = Math.max(1, Math.round(image.naturalWidth * scale));
@@ -374,7 +375,7 @@ function imageToDataUrl(image, maxEdgeLength, type = 'image/jpeg', quality) {
     ctx.fillRect(0, 0, canvas.width, canvas.height);
   }
   ctx.drawImage(image, 0, 0, canvas.width, canvas.height);
-  return canvas.toDataURL(type, quality);
+  return canvas.toDataURL(type, imageQuality);
 }
 
 function isSafeRichUrl(value, allowDataImage = false) {
@@ -412,8 +413,8 @@ async function prepareImageUpload(file) {
       if (isSafeRichUrl(png, true)) return png;
     }
 
-    for (const quality of UPLOAD_IMAGE_QUALITIES) {
-      const jpeg = imageToDataUrl(image, maxEdgeLength, 'image/jpeg', quality);
+    for (const imageQuality of UPLOAD_IMAGE_QUALITIES) {
+      const jpeg = imageToDataUrl(image, maxEdgeLength, 'image/jpeg', imageQuality);
       if (isSafeRichUrl(jpeg, true)) return jpeg;
     }
   }
@@ -438,7 +439,7 @@ async function handleImageUpload(quill, range, files) {
   quill.setSelection(range.index + images.length, 0, 'silent');
 }
 
-function uploadImages(range, files) {
+function processImageFiles(range, files) {
   if (!this?.quill) return Promise.resolve();
   return handleImageUpload(this.quill, range, files);
 }
@@ -606,7 +607,7 @@ function initEditor() {
     modules: {
       toolbar: RICH_CONTENT_TOOLBAR,
       uploader: {
-        handler: uploadImages,
+        handler: processImageFiles,
       },
     },
   });
@@ -629,7 +630,7 @@ function initRelationEditor() {
       modules: {
         toolbar: RICH_CONTENT_TOOLBAR,
         uploader: {
-          handler: uploadImages,
+          handler: processImageFiles,
         },
       },
     });
