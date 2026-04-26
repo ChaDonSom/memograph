@@ -359,7 +359,7 @@ function loadImage(src) {
   });
 }
 
-function imageToDataUrl(image, maxEdgeLength, type = 'image/jpeg', imageQuality) {
+function imageToDataUrl(image, maxEdgeLength, type = 'image/jpeg', imageQuality = 0.92) {
   const scale = Math.min(1, maxEdgeLength / Math.max(image.naturalWidth, image.naturalHeight));
   const canvas = document.createElement('canvas');
   canvas.width = Math.max(1, Math.round(image.naturalWidth * scale));
@@ -367,7 +367,7 @@ function imageToDataUrl(image, maxEdgeLength, type = 'image/jpeg', imageQuality)
 
   const ctx = canvas.getContext('2d');
   if (!ctx) {
-    console.warn('Unable to resize image upload because a canvas context could not be created.');
+    console.warn('Unable to resize image upload because this browser could not create a canvas context.');
     return '';
   }
   if (type === 'image/jpeg') {
@@ -433,13 +433,15 @@ async function handleImageUpload(quill, range, files) {
   if (!images.length) return;
 
   quill.deleteText(range.index, range.length, 'user');
-  images.forEach((image, index) => {
-    quill.insertEmbed(range.index + index, 'image', image, 'user');
+  let insertAt = range.index;
+  images.forEach(image => {
+    quill.insertEmbed(insertAt, 'image', image, 'user');
+    insertAt += 1;
   });
-  quill.setSelection(range.index + images.length, 0, 'silent');
+  quill.setSelection(insertAt, 0, 'silent');
 }
 
-function processImageFiles(range, files) {
+function imageUploadHandler(range, files) {
   if (!this?.quill) return Promise.resolve();
   return handleImageUpload(this.quill, range, files);
 }
@@ -607,7 +609,7 @@ function initEditor() {
     modules: {
       toolbar: RICH_CONTENT_TOOLBAR,
       uploader: {
-        handler: processImageFiles,
+        handler: imageUploadHandler,
       },
     },
   });
@@ -630,7 +632,7 @@ function initRelationEditor() {
       modules: {
         toolbar: RICH_CONTENT_TOOLBAR,
         uploader: {
-          handler: processImageFiles,
+          handler: imageUploadHandler,
         },
       },
     });
