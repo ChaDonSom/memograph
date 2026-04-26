@@ -226,10 +226,13 @@ const MS_PER_DAY = 86_400_000;
 const PREVIEW_WIDTH = 300;
 const PREVIEW_GUTTER = 18;
 const PREVIEW_HEIGHT_WITH_GUTTER = 230;
-// Keep embedded data images below a 5,000,000-character URL budget (~3.75 MB raw image)
-// to avoid oversized localStorage records and slow renders.
-const MAX_DATA_IMAGE_URL_LENGTH = 5_000_000;
+// Keep embedded data images below a conservative URL budget because each page
+// stores both Quill delta and preview HTML in localStorage.
+const MAX_DATA_IMAGE_URL_LENGTH = 1_500_000;
 const MAX_SANITIZED_HTML_CACHE_ENTRIES = 200;
+const UPLOAD_IMAGE_MAX_EDGE_LENGTH_ATTEMPTS = [1600, 1200, 900, 600];
+// canvas.toDataURL() quality values are 0–1 and only affect lossy formats.
+const UPLOAD_IMAGE_QUALITIES = [0.82, 0.7, 0.6];
 
 // Score = explicit weight (dominant) + visit popularity + recency decay.
 // This determines the ranking order of relation cards on each page.
@@ -255,7 +258,11 @@ const nodes = ref(stored.nodes);
 const edges = ref(stored.edges);
 
 function persist() {
-  saveGraph(nodes.value, edges.value);
+  try {
+    saveGraph(nodes.value, edges.value);
+  } catch (error) {
+    console.warn('Unable to save Memograph data to localStorage.', error);
+  }
 }
 
 const currentId = ref(null);
@@ -334,6 +341,49 @@ function normalizeEditorHtml(html = '') {
   return html === '<p><br></p>' ? '' : html;
 }
 
+function readFileAsDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || ''));
+    reader.onerror = () => reject(reader.error);
+    reader.readAsDataURL(file);
+  });
+}
+
+function loadImage(src) {
+  return new Promise((resolve, reject) => {
+    const image = new Image();
+    image.onload = () => resolve(image);
+    image.onerror = reject;
+    image.src = src;
+  });
+}
+
+/**
+ * Resizes an image so its longest edge fits maxEdgeLength and returns a data URL.
+ */
+function imageToDataUrl(image, maxEdgeLength, type = 'image/jpeg', imageQuality) {
+  const scale = Math.min(1, maxEdgeLength / Math.max(1, image.naturalWidth, image.naturalHeight));
+  const canvas = document.createElement('canvas');
+  canvas.width = Math.max(1, Math.round(image.naturalWidth * scale));
+  canvas.height = Math.max(1, Math.round(image.naturalHeight * scale));
+
+  const ctx = canvas.getContext('2d');
+  if (!ctx) {
+    console.warn('Unable to resize image upload because this browser could not create a canvas context. The image will not be inserted; try another browser if this continues.');
+    return '';
+  }
+  if (type === 'image/jpeg') {
+    // JPEG has no transparency, so use white instead of the browser default black.
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+  }
+  ctx.drawImage(image, 0, 0, canvas.width, canvas.height);
+  return type === 'image/jpeg'
+    ? canvas.toDataURL(type, imageQuality ?? UPLOAD_IMAGE_QUALITIES[0])
+    : canvas.toDataURL(type);
+}
+
 function isSafeRichUrl(value, allowDataImage = false) {
   const trimmed = value.trim();
   if (allowDataImage && /^data:image\/(png|jpe?g|gif|webp);base64,/i.test(trimmed)) {
@@ -355,6 +405,66 @@ function isSafeRichUrl(value, allowDataImage = false) {
   } catch {
     return false;
   }
+}
+
+/**
+ * Tries progressively smaller image sizes/qualities until the data URL can be stored.
+ */
+async function prepareImageUpload(file) {
+  const original = await readFileAsDataUrl(file);
+  if (isSafeRichUrl(original, true)) return original;
+
+  const image = await loadImage(original);
+  for (const maxEdgeLength of UPLOAD_IMAGE_MAX_EDGE_LENGTH_ATTEMPTS) {
+    if (file.type === 'image/png') {
+      // PNG is lossless, so retrying at smaller dimensions is the only size lever.
+      const png = imageToDataUrl(image, maxEdgeLength, 'image/png');
+      if (isSafeRichUrl(png, true)) return png;
+    }
+
+    // If a PNG is still too large, fall back to JPEG so the image can persist.
+    for (const imageQuality of UPLOAD_IMAGE_QUALITIES) {
+      const jpeg = imageToDataUrl(image, maxEdgeLength, 'image/jpeg', imageQuality);
+      if (isSafeRichUrl(jpeg, true)) return jpeg;
+    }
+  }
+
+  return '';
+}
+
+async function handleImageUpload(quill, range, files) {
+  const fileCount = files.length;
+  const images = (await Promise.all(
+    Array.from(files, file => prepareImageUpload(file).catch(error => {
+      console.warn(`Unable to prepare image upload for ${file.name || file.type || 'selected file'}.`, error);
+      return '';
+    }))
+  )).filter(Boolean);
+
+  if (!images.length) {
+    alert('Unable to add that image. Try a smaller image or a different image format.');
+    return;
+  }
+  if (images.length < fileCount) {
+    alert('Some images could not be added. Try smaller images or a different image format.');
+  }
+
+  quill.deleteText(range.index, range.length, 'user');
+  let insertAt = range.index;
+  for (const imageDataUrl of images) {
+    quill.insertEmbed(insertAt, 'image', imageDataUrl, 'user');
+    insertAt++;
+  }
+  quill.setSelection(insertAt, 0, 'silent');
+}
+
+/**
+ * Quill uploader handler; Quill provides the uploader module as `this`.
+ */
+function imageUploadHandler(range, files) {
+  // Quill calls uploader handlers with the uploader module as `this`.
+  if (!this?.quill) return Promise.resolve();
+  return handleImageUpload(this.quill, range, files);
 }
 
 function sanitizeRichHtml(html = '') {
@@ -423,6 +533,40 @@ function sanitizeRichHtml(html = '') {
   return sanitized;
 }
 
+/**
+ * Returns a storage-safe Quill delta with unsafe image embeds and links removed.
+ * Malformed deltas and operations are omitted so persistence can continue.
+ */
+function sanitizeRichDelta(delta) {
+  const ops = Array.isArray(delta?.ops) ? delta.ops : [];
+  return {
+    ops: ops
+      .filter(op => {
+        if (!op || typeof op !== 'object') return false;
+        const image = typeof op.insert === 'object' ? op.insert?.image : null;
+        return !image || isSafeRichUrl(String(image), true);
+      })
+      .map(op => {
+        const cleaned = { ...op };
+        if (op.insert && typeof op.insert === 'object') {
+          cleaned.insert = { ...op.insert };
+        }
+        if (op.attributes && typeof op.attributes === 'object') {
+          cleaned.attributes = { ...op.attributes };
+        }
+
+        const link = cleaned.attributes?.link;
+        if (!link || isSafeRichUrl(String(link))) return cleaned;
+
+        delete cleaned.attributes.link;
+        if (!Object.keys(cleaned.attributes).length) {
+          delete cleaned.attributes;
+        }
+        return cleaned;
+      }),
+  };
+}
+
 function splitRelationDescription(desc = '') {
   const [label = '', ...detailLines] = desc.replace(/\r\n/g, '\n').split('\n');
   return {
@@ -484,7 +628,10 @@ function initEditor() {
     theme: 'snow',
     placeholder: 'Write something about this page…',
     modules: {
-      toolbar: RICH_CONTENT_TOOLBAR
+      toolbar: RICH_CONTENT_TOOLBAR,
+      uploader: {
+        handler: imageUploadHandler,
+      },
     },
   });
   const node = current.value;
@@ -504,7 +651,10 @@ function initRelationEditor() {
       theme: 'snow',
       placeholder: 'Describe this relationship. Images are supported.',
       modules: {
-        toolbar: RICH_CONTENT_TOOLBAR
+        toolbar: RICH_CONTENT_TOOLBAR,
+        uploader: {
+          handler: imageUploadHandler,
+        },
       },
     });
     modal.editorError = '';
@@ -523,7 +673,7 @@ function queueSave() {
 function flush() {
   const node = current.value;
   if (node && editor) {
-    node.bodyDelta = JSON.stringify(editor.getContents());
+    node.bodyDelta = JSON.stringify(sanitizeRichDelta(editor.getContents()));
     node.bodyHtml = sanitizeRichHtml(editor.root.innerHTML);
     node.updatedAt = Date.now();
   }
@@ -609,7 +759,7 @@ function saveRel() {
   const from = modal.dir === 'in' ? modal.targetId : cid;
   const to = modal.dir === 'in' ? cid : modal.targetId;
   const desc = relEditor.getText().trim();
-  const descDelta = JSON.stringify(relEditor.getContents());
+  const descDelta = JSON.stringify(sanitizeRichDelta(relEditor.getContents()));
   const descHtml = sanitizeRichHtml(normalizeEditorHtml(relEditor.root.innerHTML));
   edges.value.push({ id: uid(), fromId: from, toId: to, desc, descDelta, descHtml, weight: modal.w });
   if (modal.dir === 'bi') {
