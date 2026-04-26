@@ -396,7 +396,7 @@ function initRelationEditor() {
   try {
     relEditor = new Quill('#rel-editor', {
       theme: 'snow',
-      placeholder: 'Describe this relation. Images are supported.',
+      placeholder: 'Describe this relationship. Images are supported.',
       modules: {
         toolbar: RICH_CONTENT_TOOLBAR
       },
@@ -404,7 +404,7 @@ function initRelationEditor() {
     modal.editorError = '';
   } catch (error) {
     relEditor = null;
-    modal.editorError = 'Unable to initialize the relation editor. Close this dialog and try again.';
+    modal.editorError = 'Unable to initialize the relationship editor. Close this dialog and try again.';
     console.warn(modal.editorError, error);
   }
 }
@@ -496,7 +496,7 @@ function createModalTarget() {
 function saveRel() {
   if (!modal.targetId) return;
   if (!relEditor) {
-    modal.editorError = 'Unable to save because the relation editor is unavailable. Close this dialog and try again.';
+    modal.editorError = 'Unable to save because the relationship editor is unavailable. Close this dialog and try again.';
     return;
   }
   const cid = currentId.value;
