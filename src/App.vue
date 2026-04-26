@@ -230,7 +230,7 @@ const PREVIEW_HEIGHT_WITH_GUTTER = 230;
 // stores both Quill delta and preview HTML in localStorage.
 const MAX_DATA_IMAGE_URL_LENGTH = 1_500_000;
 const MAX_SANITIZED_HTML_CACHE_ENTRIES = 200;
-const UPLOAD_IMAGE_MAX_DIMENSIONS = [1600, 1200, 900, 600];
+const UPLOAD_IMAGE_MAX_EDGE_LENGTHS = [1600, 1200, 900, 600];
 // canvas.toDataURL() quality values are 0–1 and only affect lossy formats.
 const UPLOAD_IMAGE_QUALITIES = [0.82, 0.7, 0.6];
 
@@ -375,7 +375,9 @@ function imageToDataUrl(image, maxEdgeLength, type = 'image/jpeg', imageQuality 
     ctx.fillRect(0, 0, canvas.width, canvas.height);
   }
   ctx.drawImage(image, 0, 0, canvas.width, canvas.height);
-  return canvas.toDataURL(type, imageQuality);
+  return type === 'image/jpeg'
+    ? canvas.toDataURL(type, imageQuality)
+    : canvas.toDataURL(type);
 }
 
 function isSafeRichUrl(value, allowDataImage = false) {
@@ -406,7 +408,7 @@ async function prepareImageUpload(file) {
   if (isSafeRichUrl(original, true)) return original;
 
   const image = await loadImage(original);
-  for (const maxEdgeLength of UPLOAD_IMAGE_MAX_DIMENSIONS) {
+  for (const maxEdgeLength of UPLOAD_IMAGE_MAX_EDGE_LENGTHS) {
     if (file.type === 'image/png') {
       // PNG is lossless, so retrying at smaller dimensions is the only size lever.
       const png = imageToDataUrl(image, maxEdgeLength, 'image/png');
@@ -435,8 +437,8 @@ async function handleImageUpload(quill, range, files) {
 
   quill.deleteText(range.index, range.length, 'user');
   let insertAt = range.index;
-  images.forEach(image => {
-    quill.insertEmbed(insertAt, 'image', image, 'user');
+  images.forEach(imageDataUrl => {
+    quill.insertEmbed(insertAt, 'image', imageDataUrl, 'user');
     insertAt += 1;
   });
   quill.setSelection(insertAt, 0, 'silent');
