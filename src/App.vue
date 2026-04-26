@@ -345,13 +345,17 @@ const ranked = computed(() => {
     const t = findNode(tid);
     if (!t) continue;
     const relationHtml = normalizeEditorHtml(e.descHtml || '');
-    const relationText = relationHtml ? { label: '', detail: '' } : splitRelationDescription(e.desc);
+    let label = '';
+    let detail = '';
+    if (!relationHtml) {
+      ({ label, detail } = splitRelationDescription(e.desc));
+    }
     out.push({
       edgeId: e.id,
       targetId: tid,
       title: t.title || '(untitled)',
-      label: relationText.label,
-      detail: relationText.detail,
+      label,
+      detail,
       relationHtml,
       dir,
       score: pScore(e, t),
@@ -481,13 +485,13 @@ function createModalTarget() {
 }
 
 function saveRel() {
-  if (!modal.targetId) return;
+  if (!modal.targetId || !relEditor) return;
   const cid = currentId.value;
   const from = modal.dir === 'in' ? modal.targetId : cid;
   const to = modal.dir === 'in' ? cid : modal.targetId;
-  const desc = relEditor ? relEditor.getText().replace(/\s+$/, '') : modal.desc;
-  const descDelta = relEditor ? JSON.stringify(relEditor.getContents()) : '';
-  const descHtml = relEditor ? normalizeEditorHtml(relEditor.root.innerHTML) : '';
+  const desc = relEditor.getText().replace(/\s+$/, '');
+  const descDelta = JSON.stringify(relEditor.getContents());
+  const descHtml = normalizeEditorHtml(relEditor.root.innerHTML);
   edges.value.push({ id: uid(), fromId: from, toId: to, desc, descDelta, descHtml, weight: modal.w });
   if (modal.dir === 'bi') {
     edges.value.push({ id: uid(), fromId: to, toId: from, desc, descDelta, descHtml, weight: modal.w });
