@@ -358,8 +358,8 @@ function loadImage(src) {
   });
 }
 
-function imageToDataUrl(image, maxDimension, type = 'image/jpeg', quality) {
-  const scale = Math.min(1, maxDimension / Math.max(image.naturalWidth, image.naturalHeight));
+function imageToDataUrl(image, maxEdgeLength, type = 'image/jpeg', quality) {
+  const scale = Math.min(1, maxEdgeLength / Math.max(image.naturalWidth, image.naturalHeight));
   const canvas = document.createElement('canvas');
   canvas.width = Math.max(1, Math.round(image.naturalWidth * scale));
   canvas.height = Math.max(1, Math.round(image.naturalHeight * scale));
@@ -405,14 +405,15 @@ async function prepareImageUpload(file) {
   if (isSafeRichUrl(original, true)) return original;
 
   const image = await loadImage(original);
-  for (const maxDimension of UPLOAD_IMAGE_MAX_DIMENSIONS) {
+  for (const maxEdgeLength of UPLOAD_IMAGE_MAX_DIMENSIONS) {
     if (file.type === 'image/png') {
-      const png = imageToDataUrl(image, maxDimension, 'image/png');
+      // PNG is lossless, so retrying at smaller dimensions is the only size lever.
+      const png = imageToDataUrl(image, maxEdgeLength, 'image/png');
       if (isSafeRichUrl(png, true)) return png;
     }
 
     for (const quality of UPLOAD_IMAGE_QUALITIES) {
-      const jpeg = imageToDataUrl(image, maxDimension, 'image/jpeg', quality);
+      const jpeg = imageToDataUrl(image, maxEdgeLength, 'image/jpeg', quality);
       if (isSafeRichUrl(jpeg, true)) return jpeg;
     }
   }
@@ -438,6 +439,7 @@ async function handleImageUpload(quill, range, files) {
 }
 
 function uploadImages(range, files) {
+  if (!this?.quill) return Promise.resolve();
   return handleImageUpload(this.quill, range, files);
 }
 
