@@ -391,13 +391,18 @@ function initEditor() {
 }
 
 function initRelationEditor() {
-  relEditor = new Quill('#rel-editor', {
-    theme: 'snow',
-    placeholder: 'Describe this relation. Images are supported.',
-    modules: {
-      toolbar: RICH_CONTENT_TOOLBAR
-    },
-  });
+  try {
+    relEditor = new Quill('#rel-editor', {
+      theme: 'snow',
+      placeholder: 'Describe this relation. Images are supported.',
+      modules: {
+        toolbar: RICH_CONTENT_TOOLBAR
+      },
+    });
+  } catch (error) {
+    relEditor = null;
+    console.warn('Unable to initialize the relation editor.', error);
+  }
 }
 
 function queueSave() {
@@ -471,6 +476,7 @@ async function openModal() {
 
 function closeModal() {
   modal.on = false;
+  if (relEditor) relEditor.disable();
   relEditor = null;
 }
 
