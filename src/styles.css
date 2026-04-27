@@ -101,6 +101,16 @@ body {
   padding: 4px 0;
 }
 
+.s-list-status {
+  padding: 7px 16px;
+  font-size: 13px;
+  color: var(--dim);
+}
+
+.s-list-status--error {
+  color: var(--danger);
+}
+
 .n-item {
   padding: 7px 16px;
   cursor: pointer;

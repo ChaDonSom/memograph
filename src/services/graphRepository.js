@@ -1,5 +1,3 @@
-const STORAGE_KEY = 'memograph_v2';
-
 function emptyGraph() {
   return { nodes: [], edges: [] };
 }
@@ -17,18 +15,34 @@ function normalizeGraph(value) {
   };
 }
 
-export function loadGraph() {
-  const raw = localStorage.getItem(STORAGE_KEY);
-  if (!raw) return emptyGraph();
-
+async function readJsonResponse(response) {
   try {
-    return normalizeGraph(JSON.parse(raw));
+    return await response.json();
   } catch (error) {
-    console.warn('Unable to load saved Memograph data from localStorage.', error);
-    return emptyGraph();
+    throw new Error('API returned invalid JSON.', { cause: error });
   }
 }
 
-export function saveGraph(nodes, edges) {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify({ nodes, edges }));
+export async function loadGraph() {
+  const response = await fetch('/api/graph/load');
+  const data = await readJsonResponse(response);
+  if (!response.ok) {
+    throw new Error(data.error || 'Unable to load graph.');
+  }
+  return normalizeGraph(data);
 }
+
+export async function saveGraph(nodes, edges) {
+  const response = await fetch('/api/graph/save', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ nodes, edges }),
+  });
+  const data = await readJsonResponse(response);
+  if (!response.ok) {
+    throw new Error(data.error || 'Unable to save graph.');
+  }
+  return data;
+}
+
+export { emptyGraph };

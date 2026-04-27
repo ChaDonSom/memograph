@@ -29,13 +29,17 @@
     </div>
 
     <div class="s-list">
-      <div
-        v-for="n in filteredNodes"
-        :key="n.id"
-        class="n-item"
-        :class="{ active: n.id === currentId }"
-        @click="loadNode(n.id)"
-      >{{ n.title || '(untitled)' }}</div>
+      <div v-if="graphLoading" class="s-list-status">Loading graph…</div>
+      <div v-else-if="graphLoadError" class="s-list-status s-list-status--error">{{ graphLoadError }}</div>
+      <template v-else>
+        <div
+          v-for="n in filteredNodes"
+          :key="n.id"
+          class="n-item"
+          :class="{ active: n.id === currentId }"
+          @click="loadNode(n.id)"
+        >{{ n.title || '(untitled)' }}</div>
+      </template>
     </div>
 
     <div class="s-foot">
@@ -315,7 +319,7 @@
 <script setup>
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue';
 import Quill from 'quill';
-import { loadGraph, saveGraph } from './services/graphRepository.js';
+import { emptyGraph, loadGraph, saveGraph } from './services/graphRepository.js';
 
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
 
@@ -355,21 +359,19 @@ function timeAgo(ts) {
   return `${Math.floor(s / 86400)}d ago`;
 }
 
-const stored = loadGraph();
-const nodes = ref(stored.nodes);
-const edges = ref(stored.edges);
+const nodes = ref([]);
+const edges = ref([]);
 
 function persist() {
-  try {
-    saveGraph(nodes.value, edges.value);
-  } catch (error) {
-    console.warn('Unable to save Memograph data to localStorage.', error);
-  }
+  saveGraph(nodes.value, edges.value)
+    .catch(error => console.warn('Unable to save Memograph data to Memgraph.', error));
 }
 
 const currentId = ref(null);
 const search = ref('');
 const listOpen = ref(false);
+const graphLoading = ref(true);
+const graphLoadError = ref('');
 const sidebarEl = ref(null);
 const mainScrollEl = ref(null);
 const relationshipCanvasEl = ref(null);
@@ -1048,7 +1050,8 @@ function createGraphNode(title = '') {
 }
 
 function createGraphEdge(fromId, toId, desc, descDelta, descHtml, weight) {
-  return { id: uid(), fromId, toId, desc, descDelta, descHtml, weight };
+  const now = Date.now();
+  return { id: uid(), fromId, toId, desc, descDelta, descHtml, weight, createdAt: now, updatedAt: now };
 }
 
 async function createNode() {
@@ -1154,6 +1157,7 @@ function saveRel() {
       descDelta,
       descHtml,
       weight: modal.w,
+      updatedAt: Date.now(),
     });
     closeModal();
     persist();
@@ -1358,6 +1362,20 @@ onMounted(async () => {
   connectorResizeObserver = new ResizeObserver(scheduleConnectorUpdate);
   observeConnectorTargets();
   addConnectorScrollListener();
+
+  try {
+    const stored = await loadGraph();
+    nodes.value = stored.nodes;
+    edges.value = stored.edges;
+  } catch (error) {
+    const graph = emptyGraph();
+    nodes.value = graph.nodes;
+    edges.value = graph.edges;
+    graphLoadError.value = 'Unable to load graph.';
+    console.warn('Unable to load Memograph data from Memgraph.', error);
+  } finally {
+    graphLoading.value = false;
+  }
 
   if (nodes.value.length) {
     await loadLatestNode();
