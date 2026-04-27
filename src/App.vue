@@ -325,7 +325,7 @@ const RELATION_CARD_FIRST_LINE_LENGTH = 72;
 // Truncation length for related page body previews shown in side cards.
 const RELATED_PAGE_PREVIEW_LENGTH = 96;
 // Truncation length for relationship names shown on connector labels.
-const CONNECTOR_LABEL_LENGTH = 54;
+const CONNECTOR_LABEL_MAX_LENGTH = 54;
 const CONNECTOR_CENTER_TARGET_RATIO = 0.42;
 const CONNECTOR_MIN_TARGET_OFFSET = 48;
 // Keep embedded data images below a conservative URL budget because each page
@@ -755,6 +755,10 @@ function findNode(id) {
   return nodes.value.find(n => n.id === id) ?? null;
 }
 
+function findEdge(id) {
+  return edges.value.find(e => e.id === id) ?? null;
+}
+
 const rankedRelations = computed(() => {
   if (!currentId.value) return [];
   const cid = currentId.value;
@@ -870,7 +874,7 @@ function updateRelationConnectors() {
     nextLines.push({
       edgeId: r.edgeId,
       path: connectorPath(startX, startY, endX, endY, r.side),
-      label: truncateText(r.firstLine, CONNECTOR_LABEL_LENGTH),
+      label: truncateText(r.firstLine, CONNECTOR_LABEL_MAX_LENGTH),
       labelX: (startX + endX) / 2,
       labelY: (startY + endY) / 2 - 8,
     });
@@ -945,7 +949,8 @@ function initRelationEditor() {
     if (modal.descDelta) {
       try {
         relEditor.setContents(JSON.parse(modal.descDelta));
-      } catch {
+      } catch (error) {
+        console.warn('Unable to restore saved relationship editor contents; falling back to plain text.', error);
         relEditor.setText(modal.desc || '');
       }
     } else if (modal.desc) {
@@ -1048,7 +1053,7 @@ function openModal() {
 }
 
 function openEditRelationModal(relation) {
-  const edge = edges.value.find(e => e.id === relation.edgeId);
+  const edge = findEdge(relation.edgeId);
   const target = findNode(relation.targetId);
   if (!edge || !target) return;
   Object.assign(modal, {
@@ -1096,7 +1101,7 @@ function saveRel() {
   const descDelta = JSON.stringify(sanitizeRichDelta(relEditor.getContents()));
   const descHtml = sanitizeRichHtml(normalizeEditorHtml(relEditor.root.innerHTML));
   if (modal.mode === 'edit') {
-    const edge = edges.value.find(e => e.id === modal.edgeId);
+    const edge = findEdge(modal.edgeId);
     if (!edge) return;
     Object.assign(edge, {
       fromId: from,
