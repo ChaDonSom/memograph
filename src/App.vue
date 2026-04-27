@@ -57,7 +57,7 @@
         >
           <defs>
             <marker id="rel-arrowhead" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto" markerUnits="strokeWidth">
-              <path d="M 0 0 L 8 4 L 0 8 z" fill="#818cf8" />
+              <path d="M 0 0 L 8 4 L 0 8 z" />
             </marker>
           </defs>
           <g v-for="line in connectorLines" :key="line.edgeId" class="rel-connector">
@@ -322,7 +322,9 @@ const PREVIEW_WIDTH = 300;
 const PREVIEW_GUTTER = 18;
 const PREVIEW_HEIGHT_WITH_GUTTER = 230;
 const RELATION_CARD_FIRST_LINE_LENGTH = 72;
+// Truncation length for related page body previews shown in side cards.
 const RELATED_PAGE_PREVIEW_LENGTH = 96;
+// Truncation length for relationship names shown on connector labels.
 const CONNECTOR_LABEL_LENGTH = 54;
 const CONNECTOR_CENTER_TARGET_RATIO = 0.42;
 const CONNECTOR_MIN_TARGET_OFFSET = 48;
@@ -720,9 +722,13 @@ function truncateText(text = '', maxLength) {
   return text.length > maxLength ? `${text.slice(0, maxLength - 1).trimEnd()}…` : text;
 }
 
+function firstNormalizedLine(text = '') {
+  return text.replace(/\r\n/g, '\n').split('\n')[0].trim();
+}
+
 function extractRelationPreview(relationHtml, desc = '') {
   const richText = relationHtml ? richTextToPlainText(relationHtml) : '';
-  const plainText = richText || desc.replace(/\r\n/g, '\n').split('\n')[0].trim() || '';
+  const plainText = richText || firstNormalizedLine(desc) || '';
   return truncateText(plainText || 'Relationship', RELATION_CARD_FIRST_LINE_LENGTH);
 }
 

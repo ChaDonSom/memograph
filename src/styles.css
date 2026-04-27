@@ -8,6 +8,7 @@
   --border:    #2a2f52;
   --border2:   #383e68;
   --accent:    #818cf8;
+  --connector: #818cf8;
   --accent-d:  rgba(129,140,248,.15);
   --accent-g:  rgba(129,140,248,.07);
   --text:      #dde1f5;
@@ -508,7 +509,7 @@ body {
   stroke-width: 1.5;
 }
 
-.rel-connector marker path { fill: rgba(129, 140, 248, .72); }
+.rel-connector marker path { fill: var(--connector); }
 
 .rel-connector-labels {
   position: absolute;
