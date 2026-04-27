@@ -91,14 +91,18 @@
             <!-- Incoming: other page is the subject, its title leads -->
             <template v-if="r.dir.startsWith('←')">
               <div class="rel-title">{{ r.title }}</div>
-              <div class="rel-label-text" v-if="r.label">{{ r.label }}</div>
-              <div class="rel-detail" v-if="r.detail">{{ r.detail }}</div>
+              <div class="rel-rich" v-if="r.relationHtml" v-html="r.relationHtml"></div>
+              <template v-else>
+                <div class="rel-label-text" v-if="r.label">{{ r.label }}</div>
+                <div class="rel-detail" v-if="r.detail">{{ r.detail }}</div>
+              </template>
             </template>
             <!-- Outgoing: relation label is the predicate, target title follows -->
             <template v-else>
-              <div class="rel-label-text" v-if="r.label">{{ r.label }}</div>
+              <div class="rel-rich" v-if="r.relationHtml" v-html="r.relationHtml"></div>
+              <div class="rel-label-text" v-else-if="r.label">{{ r.label }}</div>
               <div class="rel-title">{{ r.title }}</div>
-              <div class="rel-detail" v-if="r.detail">{{ r.detail }}</div>
+              <div class="rel-detail" v-if="!r.relationHtml && r.detail">{{ r.detail }}</div>
             </template>
             <div class="rel-foot">
               <span class="rel-score">P={{ r.score.toFixed(1) }}</span>
@@ -178,10 +182,10 @@
 
     <div class="field">
       <label>Description / label</label>
-      <textarea
-        v-model="modal.desc"
-        placeholder="First line is the relation label. Add more lines for details shown below the related page title."
-      ></textarea>
+      <div class="rel-editor-wrap">
+        <div id="rel-editor"></div>
+      </div>
+      <div class="field-error" v-if="modal.editorError">{{ modal.editorError }}</div>
     </div>
 
     <div class="field">
@@ -203,7 +207,7 @@
 
     <div class="modal-btns">
       <button class="btn btn-ghost" @click="closeModal">Cancel</button>
-      <button class="btn btn-primary" @click="saveRel" :disabled="!modal.targetId">Save</button>
+      <button class="btn btn-primary" @click="saveRel" :disabled="!modal.targetId || !!modal.editorError">Save</button>
     </div>
   </div>
 </div>
@@ -222,6 +226,13 @@ const MS_PER_DAY = 86_400_000;
 const PREVIEW_WIDTH = 300;
 const PREVIEW_GUTTER = 18;
 const PREVIEW_HEIGHT_WITH_GUTTER = 230;
+// Keep embedded data images below a conservative URL budget because each page
+// stores both Quill delta and preview HTML in localStorage.
+const MAX_DATA_IMAGE_URL_LENGTH = 1_500_000;
+const MAX_SANITIZED_HTML_CACHE_ENTRIES = 200;
+const UPLOAD_IMAGE_MAX_EDGE_LENGTH_ATTEMPTS = [1600, 1200, 900, 600];
+// canvas.toDataURL() quality values are 0–1 and only affect lossy formats.
+const UPLOAD_IMAGE_QUALITIES = [0.82, 0.7, 0.6];
 
 // Score = explicit weight (dominant) + visit popularity + recency decay.
 // This determines the ranking order of relation cards on each page.
@@ -247,7 +258,11 @@ const nodes = ref(stored.nodes);
 const edges = ref(stored.edges);
 
 function persist() {
-  saveGraph(nodes.value, edges.value);
+  try {
+    saveGraph(nodes.value, edges.value);
+  } catch (error) {
+    console.warn('Unable to save Memograph data to localStorage.', error);
+  }
 }
 
 const currentId = ref(null);
@@ -255,13 +270,37 @@ const search = ref('');
 const listOpen = ref(false);
 const sidebarEl = ref(null);
 let editor = null;
+let relEditor = null;
 let saveTimer = null;
+
+const RICH_CONTENT_TOOLBAR = [
+  ['bold', 'italic', 'underline', 'strike'],
+  [{ header: [1, 2, 3, false] }],
+  ['blockquote', 'code-block'],
+  [{ list: 'ordered' }, { list: 'bullet' }],
+  ['link', 'image'],
+  ['clean'],
+];
+
+const RICH_ALLOWED_TAGS = new Set([
+  'A', 'B', 'BLOCKQUOTE', 'BR', 'CODE', 'DIV', 'EM', 'H1', 'H2', 'H3', 'IMG',
+  'LI', 'OL', 'P', 'PRE', 'S', 'SPAN', 'STRONG', 'U', 'UL',
+]);
+const RICH_GLOBAL_ATTRS = new Set(['class']);
+const RICH_ALLOWED_ATTRS = {
+  A: new Set(['href', 'rel', 'target', 'title']),
+  IMG: new Set(['alt', 'src', 'title']),
+  LI: new Set(['data-list']),
+  SPAN: new Set(['contenteditable']),
+};
+const sanitizedHtmlCache = new Map();
 
 const modal = reactive({
   on: false,
   targetId: '',
   targetSearch: '',
   desc: '',
+  editorError: '',
   dir: 'out',
   w: DEFAULT_EDGE_WEIGHT,
 });
@@ -298,6 +337,236 @@ const modalTargetCreateLabel = computed(() => {
   return title ? `"${title}"` : 'untitled page';
 });
 
+function normalizeEditorHtml(html = '') {
+  return html === '<p><br></p>' ? '' : html;
+}
+
+function readFileAsDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || ''));
+    reader.onerror = () => reject(reader.error);
+    reader.readAsDataURL(file);
+  });
+}
+
+function loadImage(src) {
+  return new Promise((resolve, reject) => {
+    const image = new Image();
+    image.onload = () => resolve(image);
+    image.onerror = reject;
+    image.src = src;
+  });
+}
+
+/**
+ * Resizes an image so its longest edge fits maxEdgeLength and returns a data URL.
+ */
+function imageToDataUrl(image, maxEdgeLength, type = 'image/jpeg', imageQuality) {
+  const scale = Math.min(1, maxEdgeLength / Math.max(1, image.naturalWidth, image.naturalHeight));
+  const canvas = document.createElement('canvas');
+  canvas.width = Math.max(1, Math.round(image.naturalWidth * scale));
+  canvas.height = Math.max(1, Math.round(image.naturalHeight * scale));
+
+  const ctx = canvas.getContext('2d');
+  if (!ctx) {
+    console.warn('Unable to resize image upload because this browser could not create a canvas context. The image will not be inserted; try another browser if this continues.');
+    return '';
+  }
+  if (type === 'image/jpeg') {
+    // JPEG has no transparency, so use white instead of the browser default black.
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+  }
+  ctx.drawImage(image, 0, 0, canvas.width, canvas.height);
+  return type === 'image/jpeg'
+    ? canvas.toDataURL(type, imageQuality ?? UPLOAD_IMAGE_QUALITIES[0])
+    : canvas.toDataURL(type);
+}
+
+function isSafeRichUrl(value, allowDataImage = false) {
+  const trimmed = value.trim();
+  if (allowDataImage && /^data:image\/(png|jpe?g|gif|webp);base64,/i.test(trimmed)) {
+    if (trimmed.length > MAX_DATA_IMAGE_URL_LENGTH) return false;
+    const commaIndex = trimmed.indexOf(',');
+    const data = trimmed.slice(commaIndex + 1);
+    if (!data || data.length % 4 !== 0 || !/^[a-z0-9+/]+={0,2}$/i.test(data)) return false;
+    try {
+      atob(data);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  try {
+    const url = new URL(trimmed, window.location.origin);
+    return ['http:', 'https:', 'mailto:'].includes(url.protocol);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Tries progressively smaller image sizes/qualities until the data URL can be stored.
+ */
+async function prepareImageUpload(file) {
+  const original = await readFileAsDataUrl(file);
+  if (isSafeRichUrl(original, true)) return original;
+
+  const image = await loadImage(original);
+  for (const maxEdgeLength of UPLOAD_IMAGE_MAX_EDGE_LENGTH_ATTEMPTS) {
+    if (file.type === 'image/png') {
+      // PNG is lossless, so retrying at smaller dimensions is the only size lever.
+      const png = imageToDataUrl(image, maxEdgeLength, 'image/png');
+      if (isSafeRichUrl(png, true)) return png;
+    }
+
+    // If a PNG is still too large, fall back to JPEG so the image can persist.
+    for (const imageQuality of UPLOAD_IMAGE_QUALITIES) {
+      const jpeg = imageToDataUrl(image, maxEdgeLength, 'image/jpeg', imageQuality);
+      if (isSafeRichUrl(jpeg, true)) return jpeg;
+    }
+  }
+
+  return '';
+}
+
+async function handleImageUpload(quill, range, files) {
+  const fileCount = files.length;
+  const images = (await Promise.all(
+    Array.from(files, file => prepareImageUpload(file).catch(error => {
+      console.warn(`Unable to prepare image upload for ${file.name || file.type || 'selected file'}.`, error);
+      return '';
+    }))
+  )).filter(Boolean);
+
+  if (!images.length) {
+    alert('Unable to add that image. Try a smaller image or a different image format.');
+    return;
+  }
+  if (images.length < fileCount) {
+    alert('Some images could not be added. Try smaller images or a different image format.');
+  }
+
+  quill.deleteText(range.index, range.length, 'user');
+  let insertAt = range.index;
+  for (const imageDataUrl of images) {
+    quill.insertEmbed(insertAt, 'image', imageDataUrl, 'user');
+    insertAt++;
+  }
+  quill.setSelection(insertAt, 0, 'silent');
+}
+
+/**
+ * Quill uploader handler; Quill provides the uploader module as `this`.
+ */
+function imageUploadHandler(range, files) {
+  // Quill calls uploader handlers with the uploader module as `this`.
+  if (!this?.quill) return Promise.resolve();
+  return handleImageUpload(this.quill, range, files);
+}
+
+function sanitizeRichHtml(html = '') {
+  if (sanitizedHtmlCache.has(html)) {
+    const cached = sanitizedHtmlCache.get(html);
+    sanitizedHtmlCache.delete(html);
+    sanitizedHtmlCache.set(html, cached);
+    return cached;
+  }
+
+  const template = document.createElement('template');
+  template.innerHTML = html;
+
+  function cleanNode(node) {
+    if (node.nodeType !== Node.ELEMENT_NODE) return;
+
+    const element = node;
+    if (['SCRIPT', 'STYLE'].includes(element.tagName)) {
+      element.remove();
+      return;
+    }
+
+    if (!RICH_ALLOWED_TAGS.has(element.tagName)) {
+      element.replaceWith(...element.childNodes);
+      return;
+    }
+
+    for (const attr of [...element.attributes]) {
+      const allowedForTag = RICH_ALLOWED_ATTRS[element.tagName] ?? new Set();
+      const isAllowed = RICH_GLOBAL_ATTRS.has(attr.name) || allowedForTag.has(attr.name);
+      if (!isAllowed || /^on/i.test(attr.name)) {
+        element.removeAttribute(attr.name);
+      }
+    }
+
+    if (element.tagName === 'A') {
+      const href = element.getAttribute('href');
+      if (!href || !isSafeRichUrl(href)) {
+        element.removeAttribute('href');
+      } else {
+        element.setAttribute('rel', 'noopener noreferrer');
+        element.setAttribute('target', '_blank');
+      }
+    }
+
+    if (element.tagName === 'IMG') {
+      const src = element.getAttribute('src');
+      if (!src || !isSafeRichUrl(src, true)) {
+        element.remove();
+        return;
+      }
+    }
+  }
+
+  let current;
+  const walker = document.createTreeWalker(template.content, NodeFilter.SHOW_ELEMENT);
+  while ((current = walker.nextNode())) {
+    cleanNode(current);
+  }
+
+  const sanitized = template.innerHTML;
+  if (sanitizedHtmlCache.size >= MAX_SANITIZED_HTML_CACHE_ENTRIES) {
+    sanitizedHtmlCache.delete(sanitizedHtmlCache.keys().next().value);
+  }
+  sanitizedHtmlCache.set(html, sanitized);
+  return sanitized;
+}
+
+/**
+ * Returns a storage-safe Quill delta with unsafe image embeds and links removed.
+ * Malformed deltas and operations are omitted so persistence can continue.
+ */
+function sanitizeRichDelta(delta) {
+  const ops = Array.isArray(delta?.ops) ? delta.ops : [];
+  return {
+    ops: ops
+      .filter(op => {
+        if (!op || typeof op !== 'object') return false;
+        const image = typeof op.insert === 'object' ? op.insert?.image : null;
+        return !image || isSafeRichUrl(String(image), true);
+      })
+      .map(op => {
+        const cleaned = { ...op };
+        if (op.insert && typeof op.insert === 'object') {
+          cleaned.insert = { ...op.insert };
+        }
+        if (op.attributes && typeof op.attributes === 'object') {
+          cleaned.attributes = { ...op.attributes };
+        }
+
+        const link = cleaned.attributes?.link;
+        if (!link || isSafeRichUrl(String(link))) return cleaned;
+
+        delete cleaned.attributes.link;
+        if (!Object.keys(cleaned.attributes).length) {
+          delete cleaned.attributes;
+        }
+        return cleaned;
+      }),
+  };
+}
+
 function splitRelationDescription(desc = '') {
   const [label = '', ...detailLines] = desc.replace(/\r\n/g, '\n').split('\n');
   return {
@@ -327,13 +596,19 @@ const ranked = computed(() => {
     if (!tid) continue;
     const t = findNode(tid);
     if (!t) continue;
-    const relationText = splitRelationDescription(e.desc);
+    const relationHtml = sanitizeRichHtml(normalizeEditorHtml(e.descHtml || ''));
+    let label = '';
+    let detail = '';
+    if (!relationHtml) {
+      ({ label, detail } = splitRelationDescription(e.desc));
+    }
     out.push({
       edgeId: e.id,
       targetId: tid,
       title: t.title || '(untitled)',
-      label: relationText.label,
-      detail: relationText.detail,
+      label,
+      detail,
+      relationHtml,
       dir,
       score: pScore(e, t),
     });
@@ -353,14 +628,10 @@ function initEditor() {
     theme: 'snow',
     placeholder: 'Write something about this page…',
     modules: {
-      toolbar: [
-        ['bold', 'italic', 'underline', 'strike'],
-        [{ header: [1, 2, 3, false] }],
-        ['blockquote', 'code-block'],
-        [{ list: 'ordered' }, { list: 'bullet' }],
-        ['link'],
-        ['clean'],
-      ]
+      toolbar: RICH_CONTENT_TOOLBAR,
+      uploader: {
+        handler: imageUploadHandler,
+      },
     },
   });
   const node = current.value;
@@ -374,6 +645,26 @@ function initEditor() {
   editor.on('text-change', queueSave);
 }
 
+function initRelationEditor() {
+  try {
+    relEditor = new Quill('#rel-editor', {
+      theme: 'snow',
+      placeholder: 'Describe this relationship. Images are supported.',
+      modules: {
+        toolbar: RICH_CONTENT_TOOLBAR,
+        uploader: {
+          handler: imageUploadHandler,
+        },
+      },
+    });
+    modal.editorError = '';
+  } catch (error) {
+    relEditor = null;
+    modal.editorError = 'Unable to initialize the relationship editor. Close this dialog and try again, or refresh the page if the problem continues.';
+    console.warn(modal.editorError, error);
+  }
+}
+
 function queueSave() {
   clearTimeout(saveTimer);
   saveTimer = setTimeout(flush, SAVE_DELAY_MS);
@@ -382,8 +673,8 @@ function queueSave() {
 function flush() {
   const node = current.value;
   if (node && editor) {
-    node.bodyDelta = JSON.stringify(editor.getContents());
-    node.bodyHtml = editor.root.innerHTML;
+    node.bodyDelta = JSON.stringify(sanitizeRichDelta(editor.getContents()));
+    node.bodyHtml = sanitizeRichHtml(editor.root.innerHTML);
     node.updatedAt = Date.now();
   }
   persist();
@@ -436,13 +727,16 @@ function openModal() {
     targetId: '',
     targetSearch: '',
     desc: '',
+    editorError: '',
     dir: 'out',
     w: DEFAULT_EDGE_WEIGHT,
   });
+  nextTick(initRelationEditor);
 }
 
 function closeModal() {
   modal.on = false;
+  relEditor = null;
 }
 
 function selectModalTarget(node) {
@@ -457,14 +751,21 @@ function createModalTarget() {
 
 function saveRel() {
   if (!modal.targetId) return;
+  if (!relEditor) {
+    modal.editorError = 'Unable to save because the relationship editor is unavailable. Close this dialog and try again, or refresh the page if the problem continues.';
+    return;
+  }
   const cid = currentId.value;
   const from = modal.dir === 'in' ? modal.targetId : cid;
   const to = modal.dir === 'in' ? cid : modal.targetId;
-  edges.value.push({ id: uid(), fromId: from, toId: to, desc: modal.desc, weight: modal.w });
+  const desc = relEditor.getText().trim();
+  const descDelta = JSON.stringify(sanitizeRichDelta(relEditor.getContents()));
+  const descHtml = sanitizeRichHtml(normalizeEditorHtml(relEditor.root.innerHTML));
+  edges.value.push({ id: uid(), fromId: from, toId: to, desc, descDelta, descHtml, weight: modal.w });
   if (modal.dir === 'bi') {
-    edges.value.push({ id: uid(), fromId: to, toId: from, desc: modal.desc, weight: modal.w });
+    edges.value.push({ id: uid(), fromId: to, toId: from, desc, descDelta, descHtml, weight: modal.w });
   }
-  modal.on = false;
+  closeModal();
   persist();
 }
 
@@ -481,7 +782,7 @@ function showPrev(evt, tid) {
   const x = Math.min(rect.right + 12, window.innerWidth - PREVIEW_WIDTH - PREVIEW_GUTTER);
   const y = Math.max(8, Math.min(rect.top, window.innerHeight - PREVIEW_HEIGHT_WITH_GUTTER));
   prev.title = t.title || '(untitled)';
-  prev.html = t.bodyHtml || '<em style="opacity:.45">No content yet.</em>';
+  prev.html = sanitizeRichHtml(t.bodyHtml || '') || '<em style="opacity:.45">No content yet.</em>';
   prev.x = x;
   prev.y = y;
   prev.on = true;
