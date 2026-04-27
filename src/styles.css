@@ -189,6 +189,13 @@ body {
   gap: 24px;
   position: relative;
   z-index: 2;
+  border-radius: var(--r);
+  transition: box-shadow .15s ease, outline-color .15s ease;
+}
+
+.resource-panel.rel-panel--connected-active {
+  outline: 1px solid rgba(129, 140, 248, .42);
+  box-shadow: 0 0 0 4px rgba(129, 140, 248, .08);
 }
 
 /* Title */
@@ -395,6 +402,12 @@ body {
   box-shadow: 0 4px 18px rgba(0,0,0,.35);
 }
 
+.rel-card--connected-active {
+  border-color: rgba(129, 140, 248, .82);
+  background: color-mix(in srgb, var(--surface) 78%, var(--accent) 22%);
+  box-shadow: 0 0 0 2px rgba(129, 140, 248, .16), 0 8px 24px rgba(0,0,0,.36);
+}
+
 .rel-dir {
   font-size: 9.5px;
   font-weight: 700;
@@ -548,14 +561,28 @@ body {
   fill: none;
   stroke: rgba(129, 140, 248, .48);
   stroke-width: 1.5;
+  pointer-events: stroke;
+  cursor: pointer;
+  transition: stroke .14s ease, stroke-width .14s ease, filter .14s ease;
 }
 
 .rel-connector marker path { fill: var(--accent); }
+
+.rel-connector--active path {
+  stroke: rgba(165, 180, 252, .95);
+  stroke-width: 2.7;
+  filter: drop-shadow(0 0 6px rgba(129, 140, 248, .38));
+}
 
 .rel-connector--remote path {
   stroke: rgba(129, 140, 248, .32);
   stroke-dasharray: 4 4;
   stroke-width: 1.2;
+}
+
+.rel-connector--remote.rel-connector--active path {
+  stroke: rgba(165, 180, 252, .85);
+  stroke-width: 2.2;
 }
 
 .rel-connector-labels {
@@ -572,6 +599,10 @@ body {
 }
 
 .rel-connector-hotspot.active {
+  z-index: 20;
+}
+
+.rel-connector-hotspot--active {
   z-index: 20;
 }
 
@@ -598,6 +629,7 @@ body {
 }
 
 .rel-connector-hotspot.active .rel-connector-label,
+.rel-connector-hotspot--active .rel-connector-label,
 .rel-connector-label:hover,
 .rel-connector-label:focus-visible {
   color: var(--text);

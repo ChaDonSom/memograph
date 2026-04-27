@@ -81,7 +81,9 @@
             v-for="line in connectorLines"
             :key="line.edgeId"
             class="rel-connector"
-            :class="{ 'rel-connector--remote': line.isRemote }"
+            :class="{ 'rel-connector--remote': line.isRemote, 'rel-connector--active': isConnectorHighlighted(line) }"
+            @mouseenter="activateRelationLine(line)"
+            @mouseleave="clearRelationHighlight"
           >
             <path :d="line.path" marker-end="url(#rel-arrowhead)" />
           </g>
@@ -91,12 +93,12 @@
             v-for="line in connectorLabelLines"
             :key="line.edgeId"
             class="rel-connector-hotspot"
-            :class="{ active: relPopover.edgeId === line.edgeId }"
+            :class="{ active: relPopover.edgeId === line.edgeId, 'rel-connector-hotspot--active': isConnectorHighlighted(line) }"
             :style="{ left: line.labelX + 'px', top: line.labelY + 'px' }"
-            @mouseenter="showRelationPopover(line.edgeId)"
-            @mouseleave="hideRelationPopover"
-            @focusin="showRelationPopover(line.edgeId)"
-            @focusout="hideRelationPopover"
+            @mouseenter="handleConnectorLabelEnter(line)"
+            @mouseleave="handleConnectorLabelLeave"
+            @focusin="handleConnectorLabelEnter(line)"
+            @focusout="handleConnectorLabelLeave"
           >
             <button
               type="button"
@@ -135,11 +137,15 @@
               :key="r.edgeId"
               :ref="el => setRelationCardRef(r.edgeId, el)"
               class="rel-card rel-card--side"
-              :class="relationCardSizeClass(r)"
+              :class="[relationCardSizeClass(r), { 'rel-card--connected-active': isRelationCardHighlighted(r) }]"
               :style="relationCardStyle(r)"
               role="button"
               tabindex="0"
               :aria-label="r.ariaLabel"
+              @mouseenter="activateRelationNode(r.targetId)"
+              @mouseleave="clearRelationHighlight"
+              @focusin="activateRelationNode(r.targetId)"
+              @focusout="clearRelationHighlight"
               @click="handleRelationCardClick($event, r)"
               @keydown.enter.self.prevent="navigateToNode(r.targetId)"
               @keydown.space.self.prevent="navigateToNode(r.targetId)"
@@ -170,11 +176,15 @@
               :key="r.edgeId"
               :ref="el => setRelationCardRef(r.edgeId, el)"
               class="rel-card rel-card--side rel-card--remote"
-              :class="relationCardSizeClass(r)"
+              :class="[relationCardSizeClass(r), { 'rel-card--connected-active': isRelationCardHighlighted(r) }]"
               :style="relationCardStyle(r)"
               role="button"
               tabindex="0"
               :aria-label="r.ariaLabel"
+              @mouseenter="activateRelationNode(r.targetId)"
+              @mouseleave="clearRelationHighlight"
+              @focusin="activateRelationNode(r.targetId)"
+              @focusout="clearRelationHighlight"
               @click="handleRelationCardClick($event, r)"
               @keydown.enter.self.prevent="navigateToNode(r.targetId)"
               @keydown.space.self.prevent="navigateToNode(r.targetId)"
@@ -195,7 +205,16 @@
           </div>
         </section>
 
-        <section class="resource-panel" ref="centerPanelEl" aria-label="Current page">
+        <section
+          class="resource-panel"
+          :class="{ 'rel-panel--connected-active': isNodeHighlighted(currentId) }"
+          ref="centerPanelEl"
+          aria-label="Current page"
+          @mouseenter="activateRelationNode(currentId)"
+          @mouseleave="clearRelationHighlight"
+          @focusin="activateRelationNode(currentId)"
+          @focusout="clearRelationHighlight"
+        >
           <!-- Title -->
           <div>
             <input
@@ -261,11 +280,15 @@
               :key="r.edgeId"
               :ref="el => setRelationCardRef(r.edgeId, el)"
               class="rel-card rel-card--side"
-              :class="relationCardSizeClass(r)"
+              :class="[relationCardSizeClass(r), { 'rel-card--connected-active': isRelationCardHighlighted(r) }]"
               :style="relationCardStyle(r)"
               role="button"
               tabindex="0"
               :aria-label="r.ariaLabel"
+              @mouseenter="activateRelationNode(r.targetId)"
+              @mouseleave="clearRelationHighlight"
+              @focusin="activateRelationNode(r.targetId)"
+              @focusout="clearRelationHighlight"
               @click="handleRelationCardClick($event, r)"
               @keydown.enter.self.prevent="navigateToNode(r.targetId)"
               @keydown.space.self.prevent="navigateToNode(r.targetId)"
@@ -296,11 +319,15 @@
               :key="r.edgeId"
               :ref="el => setRelationCardRef(r.edgeId, el)"
               class="rel-card rel-card--side rel-card--remote"
-              :class="relationCardSizeClass(r)"
+              :class="[relationCardSizeClass(r), { 'rel-card--connected-active': isRelationCardHighlighted(r) }]"
               :style="relationCardStyle(r)"
               role="button"
               tabindex="0"
               :aria-label="r.ariaLabel"
+              @mouseenter="activateRelationNode(r.targetId)"
+              @mouseleave="clearRelationHighlight"
+              @focusin="activateRelationNode(r.targetId)"
+              @focusout="clearRelationHighlight"
               @click="handleRelationCardClick($event, r)"
               @keydown.enter.self.prevent="navigateToNode(r.targetId)"
               @keydown.space.self.prevent="navigateToNode(r.targetId)"
@@ -458,13 +485,13 @@ const SAVE_DELAY_MS = 500;
 const RELATION_LABEL_TEXT_MAX_LENGTH = 72;
 const CONNECTOR_LABEL_MAX_LENGTH = 54;
 const ARIA_LABEL_DETAILS_MAX_LENGTH = 140;
-const CONNECTOR_CENTER_TARGET_RATIO = 0.42;
-const CONNECTOR_MIN_TARGET_OFFSET = 48;
 const CONNECTOR_VERTICAL_THRESHOLD = 24;
 const CONNECTOR_MAX_CURVE = 120;
 const CONNECTOR_MIN_CURVE = 48;
 const CONNECTOR_VERTICAL_CURVE_RATIO = 0.35;
 const CONNECTOR_HORIZONTAL_CURVE_RATIO = 0.45;
+const CONNECTOR_ENDPOINT_GAP = 38;
+const CONNECTOR_ENDPOINT_EDGE_PADDING = 18;
 // Each additional hop multiplies the P score by 0.62, favoring close pages while allowing strong distant pages through.
 const REMOTE_HOP_MULTIPLIER = 0.62;
 const REMOTE_MIN_SCORE = 4;
@@ -514,6 +541,9 @@ let relEditor = null;
 let saveTimer = null;
 let connectorFrame = null;
 let connectorResizeObserver = null;
+const activeRelationEdgeId = ref('');
+const activeRelationNodeId = ref('');
+const activeRelationNodeIds = ref(new Set());
 
 const imageResizeBar = reactive({
   visible: false,
@@ -765,8 +795,6 @@ const edgeLookups = computed(() => {
 
 function remoteRelationCandidate(edge, node, parent, hop, side) {
   const score = pScore(edge, node) * remoteHopAttenuation(hop);
-  const relationHtml = sanitizeRichHtml(normalizeEditorHtml(edge.descHtml || ''));
-  const pageHtml = pageDetailsHtml(node);
   return {
     edgeId: `${side}-hop${hop}-${edge.id}`,
     graphEdgeId: edge.id,
@@ -777,14 +805,29 @@ function remoteRelationCandidate(edge, node, parent, hop, side) {
     title: node.title || '(untitled)',
     score,
     hop,
+    pageMeta: `Edited ${timeAgo(node.updatedAt)} \u00b7 ${node.visits || 0} visit${node.visits !== 1 ? 's' : ''}`,
+    dir: side === 'incoming' ? `\u2190 ${hop} steps away` : `\u2192 ${hop} steps away`,
+    side,
+  };
+}
+
+function hydrateRemoteRelation(relation) {
+  const edge = findEdge(relation.graphEdgeId);
+  const node = findNode(relation.targetId);
+  if (!edge || !node) return null;
+  const relationHtml = sanitizeRichHtml(normalizeEditorHtml(edge.descHtml || ''));
+  const pageHtml = pageDetailsHtml(node);
+  const hydrated = {
+    ...relation,
+    title: node.title || '(untitled)',
     relationLabel: extractRelationLabel(relationHtml, edge.desc),
     relationBodyHtml: formatRelationBodyHtml(relationHtml, edge.desc),
     pageDetails: extractPageDetailsFromHtml(pageHtml),
     pageDetailsHtml: pageHtml,
     pageMeta: `Edited ${timeAgo(node.updatedAt)} \u00b7 ${node.visits || 0} visit${node.visits !== 1 ? 's' : ''}`,
-    dir: side === 'incoming' ? `\u2190 ${hop} steps away` : `\u2192 ${hop} steps away`,
-    side,
   };
+  hydrated.ariaLabel = relationAriaLabel(hydrated);
+  return hydrated;
 }
 
 function isBetterRemoteCandidate(candidate, currentCandidate) {
@@ -798,6 +841,8 @@ function discoverRemoteRelations(side, directRelations) {
   const blockedNodeIds = new Set([currentId.value, ...rankedRelations.value.map(r => r.targetId)]);
   const queuedNodeIds = new Set(blockedNodeIds);
   const visibleByNodeId = new Map();
+  const candidatesByEdgeId = new Map();
+  const directEdgeIds = new Set(directRelations.map(r => r.edgeId));
   const queue = directRelations.map(relation => ({ relation, hop: 1 }));
 
   for (let i = 0; i < queue.length; i++) {
@@ -815,6 +860,7 @@ function discoverRemoteRelations(side, directRelations) {
 
       // Keep low-scoring pages in the traversal queue so stronger descendants can still surface.
       const candidate = remoteRelationCandidate(edge, node, parent, nextHop, side);
+      candidatesByEdgeId.set(candidate.edgeId, candidate);
       if (isBetterRemoteCandidate(candidate, visibleByNodeId.get(node.id))) {
         if (candidate.score >= REMOTE_MIN_SCORE) {
           visibleByNodeId.set(node.id, candidate);
@@ -826,14 +872,26 @@ function discoverRemoteRelations(side, directRelations) {
     }
   }
 
-  return [...visibleByNodeId.values()]
+  const selectedRelations = [...visibleByNodeId.values()]
     // Equal scores favor closer pages because their relationship chain is easier to scan.
     .sort((a, b) => b.score - a.score || a.hop - b.hop)
-    .slice(0, REMOTE_MAX_CARDS_PER_SIDE)
-    .map(relation => ({
-      ...relation,
-      ariaLabel: relationAriaLabel(relation),
-    }));
+    .slice(0, REMOTE_MAX_CARDS_PER_SIDE);
+
+  const selectedByEdgeId = new Map(selectedRelations.map(relation => [relation.edgeId, relation]));
+  for (const relation of selectedRelations) {
+    let parentEdgeId = relation.parentEdgeId;
+    while (parentEdgeId && !directEdgeIds.has(parentEdgeId)) {
+      const ancestor = candidatesByEdgeId.get(parentEdgeId);
+      if (!ancestor) break;
+      selectedByEdgeId.set(ancestor.edgeId, ancestor);
+      parentEdgeId = ancestor.parentEdgeId;
+    }
+  }
+
+  return [...selectedByEdgeId.values()]
+    .sort((a, b) => b.score - a.score || a.hop - b.hop)
+    .map(hydrateRemoteRelation)
+    .filter(Boolean);
 }
 
 const remoteIncoming = computed(() =>
@@ -887,11 +945,85 @@ function remoteConnectorPath(startX, startY, endX, endY, laneX) {
   return `M ${startX} ${startY} C ${laneX} ${startY}, ${laneX} ${endY}, ${endX} ${endY}`;
 }
 
-function connectorCenterVerticalOffset(centerHeight, cardMidpointY, centerTop) {
-  return Math.min(
-    centerHeight * CONNECTOR_CENTER_TARGET_RATIO,
-    Math.max(CONNECTOR_MIN_TARGET_OFFSET, cardMidpointY - centerTop)
-  );
+function spacedEndpointY(rect, index, count, canvasTop) {
+  const middleY = rect.top - canvasTop + rect.height / 2;
+  if (count <= 1) return middleY;
+  const usableHeight = Math.max(0, rect.height - CONNECTOR_ENDPOINT_EDGE_PADDING * 2);
+  const groupHeight = Math.min(usableHeight, (count - 1) * CONNECTOR_ENDPOINT_GAP);
+  const step = groupHeight / (count - 1);
+  return middleY - groupHeight / 2 + step * index;
+}
+
+function registerEndpoint(endpointGroups, key, rect, baseY) {
+  const endpoint = { rect, baseY, y: baseY };
+  if (!endpointGroups.has(key)) endpointGroups.set(key, []);
+  endpointGroups.get(key).push(endpoint);
+  return endpoint;
+}
+
+function resolveEndpointGroups(endpointGroups, canvasTop) {
+  for (const endpoints of endpointGroups.values()) {
+    endpoints
+      .sort((a, b) => a.baseY - b.baseY)
+      .forEach((endpoint, index) => {
+        endpoint.y = spacedEndpointY(endpoint.rect, index, endpoints.length, canvasTop);
+      });
+  }
+}
+
+function relationTouchesNode(relation, nodeId) {
+  return !!nodeId && (relation?.fromId === nodeId || relation?.toId === nodeId);
+}
+
+function lineEndpointNodeIds(line) {
+  return [line.relation?.fromId, line.relation?.toId].filter(Boolean);
+}
+
+function activateRelationLine(line) {
+  activeRelationEdgeId.value = line.edgeId;
+  activeRelationNodeId.value = '';
+  activeRelationNodeIds.value = new Set(lineEndpointNodeIds(line));
+}
+
+function activateRelationNode(nodeId) {
+  if (!nodeId) return;
+  const highlightedIds = new Set([nodeId]);
+  for (const line of connectorLines.value) {
+    if (!relationTouchesNode(line.relation, nodeId)) continue;
+    for (const endpointId of lineEndpointNodeIds(line)) highlightedIds.add(endpointId);
+  }
+  activeRelationEdgeId.value = '';
+  activeRelationNodeId.value = nodeId;
+  activeRelationNodeIds.value = highlightedIds;
+}
+
+function clearRelationHighlight() {
+  activeRelationEdgeId.value = '';
+  activeRelationNodeId.value = '';
+  activeRelationNodeIds.value = new Set();
+}
+
+function isNodeHighlighted(nodeId) {
+  return activeRelationNodeIds.value.has(nodeId);
+}
+
+function isRelationCardHighlighted(relation) {
+  return isNodeHighlighted(relation.targetId);
+}
+
+function isConnectorHighlighted(line) {
+  return activeRelationEdgeId.value === line.edgeId
+    || relationTouchesNode(line.relation, activeRelationNodeId.value);
+}
+
+function handleConnectorLabelEnter(line) {
+  activateRelationLine(line);
+  showRelationPopover(line.edgeId);
+}
+
+function handleConnectorLabelLeave() {
+  clearRelationHighlight();
+  hideRelationPopover();
 }
 
 function updateRelationConnectors() {
@@ -907,30 +1039,26 @@ function updateRelationConnectors() {
   connectorCanvas.width = Math.round(canvasRect.width);
   connectorCanvas.height = Math.round(canvasRect.height);
 
-  const nextLines = [];
+  const endpointGroups = new Map();
+  const directDescriptors = [];
+  const remoteDescriptors = [];
+
   for (const r of rankedRelations.value) {
     const card = relationCardEls.get(r.edgeId);
     if (!card) continue;
 
     const cardRect = card.getBoundingClientRect();
     const cardMidpointY = cardRect.top - canvasRect.top + cardRect.height / 2;
-    const centerTop = centerRect.top - canvasRect.top;
-    const centerAttachmentY = centerTop + connectorCenterVerticalOffset(centerRect.height, cardMidpointY, centerTop);
     const isIncoming = r.side === 'incoming';
-    const cardInnerX = (isIncoming ? cardRect.right : cardRect.left) - canvasRect.left;
-    const centerEdgeX = (isIncoming ? centerRect.left : centerRect.right) - canvasRect.left;
-    const startX = isIncoming ? cardInnerX : centerEdgeX;
-    const startY = isIncoming ? cardMidpointY : centerAttachmentY;
-    const endX = isIncoming ? centerEdgeX : cardInnerX;
-    const endY = isIncoming ? centerAttachmentY : cardMidpointY;
-
-    nextLines.push({
-      edgeId: r.edgeId,
-      path: connectorPath(startX, startY, endX, endY),
-      label: truncateText(r.relationLabel, CONNECTOR_LABEL_MAX_LENGTH),
+    const cardSide = isIncoming ? 'right' : 'left';
+    const centerSide = isIncoming ? 'left' : 'right';
+    directDescriptors.push({
       relation: r,
-      labelX: (startX + endX) / 2,
-      labelY: (startY + endY) / 2 - 8,
+      isIncoming,
+      cardX: (isIncoming ? cardRect.right : cardRect.left) - canvasRect.left,
+      centerX: (isIncoming ? centerRect.left : centerRect.right) - canvasRect.left,
+      cardEndpoint: registerEndpoint(endpointGroups, `card:${r.edgeId}:${cardSide}`, cardRect, cardMidpointY),
+      centerEndpoint: registerEndpoint(endpointGroups, `center:${centerSide}`, centerRect, cardMidpointY),
     });
   }
 
@@ -942,14 +1070,48 @@ function updateRelationConnectors() {
     const cardRect = card.getBoundingClientRect();
     const parentRect = parent.getBoundingClientRect();
     const isIncoming = r.side === 'incoming';
+    const cardSide = isIncoming ? 'right' : 'left';
+    const parentSide = cardSide;
     const cardX = (isIncoming ? cardRect.right : cardRect.left) - canvasRect.left;
     const parentX = (isIncoming ? parentRect.right : parentRect.left) - canvasRect.left;
     const cardY = cardRect.top - canvasRect.top + cardRect.height / 2;
     const parentY = parentRect.top - canvasRect.top + parentRect.height / 2;
+    remoteDescriptors.push({
+      relation: r,
+      remoteIndex,
+      isIncoming,
+      cardX,
+      parentX,
+      cardEndpoint: registerEndpoint(endpointGroups, `card:${r.edgeId}:${cardSide}`, cardRect, cardY),
+      parentEndpoint: registerEndpoint(endpointGroups, `card:${r.parentEdgeId}:${parentSide}`, parentRect, parentY),
+    });
+  }
+
+  resolveEndpointGroups(endpointGroups, canvasRect.top);
+  const nextLines = [];
+  for (const descriptor of directDescriptors) {
+    const { relation: r, isIncoming, cardX, centerX, cardEndpoint, centerEndpoint } = descriptor;
+    const startX = isIncoming ? cardX : centerX;
+    const startY = isIncoming ? cardEndpoint.y : centerEndpoint.y;
+    const endX = isIncoming ? centerX : cardX;
+    const endY = isIncoming ? centerEndpoint.y : cardEndpoint.y;
+
+    nextLines.push({
+      edgeId: r.edgeId,
+      path: connectorPath(startX, startY, endX, endY),
+      label: truncateText(r.relationLabel, CONNECTOR_LABEL_MAX_LENGTH),
+      relation: r,
+      labelX: (startX + endX) / 2,
+      labelY: (startY + endY) / 2 - 8,
+    });
+  }
+
+  for (const descriptor of remoteDescriptors) {
+    const { relation: r, remoteIndex, isIncoming, cardX, parentX, cardEndpoint, parentEndpoint } = descriptor;
     const startX = isIncoming ? cardX : parentX;
-    const startY = isIncoming ? cardY : parentY;
+    const startY = isIncoming ? cardEndpoint.y : parentEndpoint.y;
     const endX = isIncoming ? parentX : cardX;
-    const endY = isIncoming ? parentY : cardY;
+    const endY = isIncoming ? parentEndpoint.y : cardEndpoint.y;
     const endpointX = isIncoming ? Math.max(cardX, parentX) : Math.min(cardX, parentX);
     const laneX = remoteConnectorLaneX(isIncoming, endpointX, centerRect, canvasRect, remoteIndex);
 
