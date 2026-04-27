@@ -757,16 +757,15 @@ function formatRelationBodyHtml(relationHtml, desc = '') {
   return `<p>${escapeHtml(fallback || 'No relationship details yet.')}</p>`;
 }
 
-function extractPageDetails(node) {
-  const bodyHtml = sanitizeRichHtml(normalizeEditorHtml(node.bodyHtml || ''));
+function pageDetailsHtml(node) {
+  return sanitizeRichHtml(normalizeEditorHtml(node.bodyHtml || ''));
+}
+
+function extractPageDetails(bodyHtml) {
   const plainText = bodyHtml ? richTextToPlainText(bodyHtml) : '';
   if (plainText) return plainText;
 
   return /<img[\s>]/i.test(bodyHtml) ? 'Image-only page.' : 'No page details yet.';
-}
-
-function extractPageDetailsHtml(node) {
-  return sanitizeRichHtml(normalizeEditorHtml(node.bodyHtml || ''));
 }
 
 function relationAriaLabel(relation) {
@@ -808,6 +807,7 @@ const rankedRelations = computed(() => {
     if (!relationHtml) {
       ({ label, detail } = splitRelationDescription(e.desc));
     }
+    const pageHtml = pageDetailsHtml(t);
     const relation = {
       edgeId: e.id,
       targetId: tid,
@@ -819,8 +819,8 @@ const rankedRelations = computed(() => {
       dir,
       side,
       relationLabel: extractRelationLabel(relationHtml, e.desc),
-      pageDetails: extractPageDetails(t),
-      pageDetailsHtml: extractPageDetailsHtml(t),
+      pageDetails: extractPageDetails(pageHtml),
+      pageDetailsHtml: pageHtml,
       pageMeta: `Edited ${timeAgo(t.updatedAt)} · ${(t.visits || 0)} visit${t.visits !== 1 ? 's' : ''}`,
       score: pScore(e, t),
     };
