@@ -465,7 +465,7 @@ const CONNECTOR_MAX_CURVE = 120;
 const CONNECTOR_MIN_CURVE = 48;
 const CONNECTOR_VERTICAL_CURVE_RATIO = 0.35;
 const CONNECTOR_HORIZONTAL_CURVE_RATIO = 0.45;
-// Each remote hop retains 62% of its P score, keeping close pages favored while allowing strong distant pages through.
+// Each additional hop multiplies the P score by 0.62, favoring close pages while allowing strong distant pages through.
 const REMOTE_HOP_MULTIPLIER = 0.62;
 const REMOTE_MIN_SCORE = 4;
 const REMOTE_MAX_CARDS_PER_SIDE = 36;
@@ -474,7 +474,6 @@ const CARD_SCORE_LOW = 12;
 const CARD_SCORE_HIGH = 30;
 const MAX_HOP_INDENT_LEVEL = 5;
 const HOP_INDENT_PX = 8;
-const remoteHopMultiplierCache = new Map([[1, 1]]);
 
 const stored = loadGraph();
 const nodes = ref(stored.nodes);
@@ -630,7 +629,8 @@ function relationCardSizeClass(relation) {
 
 function relationCardStyle(relation) {
   const ratio = importanceRatio(relation.score);
-  const hopIndentLevel = Math.max(0, Math.min((relation.hop || 1) - 1, MAX_HOP_INDENT_LEVEL));
+  const hop = Number.isFinite(relation.hop) ? relation.hop : 1;
+  const hopIndentLevel = Math.max(0, Math.min(hop - 1, MAX_HOP_INDENT_LEVEL));
   return {
     '--rel-importance': ratio.toFixed(3),
     '--rel-hop-indent': `${hopIndentLevel * HOP_INDENT_PX}px`,
@@ -643,14 +643,7 @@ function relationCountLabel(side, directCount, remoteCount) {
 }
 
 function remoteHopAttenuation(hop) {
-  if (!remoteHopMultiplierCache.has(hop)) {
-    let multiplier = 1;
-    for (let step = 1; step < hop; step++) {
-      multiplier *= REMOTE_HOP_MULTIPLIER;
-    }
-    remoteHopMultiplierCache.set(hop, multiplier);
-  }
-  return remoteHopMultiplierCache.get(hop);
+  return Math.pow(REMOTE_HOP_MULTIPLIER, hop - 1);
 }
 
 function findNode(id) {
@@ -797,7 +790,7 @@ function discoverRemoteRelations(side, directRelations) {
 
   return [...visibleByNodeId.values()]
     // Equal scores favor closer pages because their relationship chain is easier to scan.
-    .sort((a, b) => b.score - a.score || a.hop - b.hop)
+    .sort((a, b) => b.score - a.score || a.hop - b.hop) // Lower hop count wins ties.
     .slice(0, REMOTE_MAX_CARDS_PER_SIDE)
     .map(relation => ({
       ...relation,
