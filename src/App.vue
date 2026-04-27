@@ -79,7 +79,7 @@
               class="rel-card rel-card--side"
               role="button"
               tabindex="0"
-              @click="loadNode(r.targetId)"
+              @click="handleRelationCardClick($event, r)"
               @keydown.enter.prevent="loadNode(r.targetId)"
               @keydown.space.prevent="loadNode(r.targetId)"
               @mouseenter="showRelationPreview($event, r)"
@@ -92,7 +92,6 @@
               <div class="rel-label-text rel-first-line">{{ r.firstLine }}</div>
               <div class="rel-foot">
                 <span class="rel-score">P={{ r.score.toFixed(1) }}</span>
-                <button class="rel-preview-btn" @click.stop="showRelationPreview($event, r)" aria-label="Preview relationship">ⓘ</button>
                 <button class="rel-del" @click.stop="dropEdge(r.edgeId)" title="Remove relation">✕</button>
               </div>
             </div>
@@ -150,7 +149,7 @@
               class="rel-card rel-card--side"
               role="button"
               tabindex="0"
-              @click="loadNode(r.targetId)"
+              @click="handleRelationCardClick($event, r)"
               @keydown.enter.prevent="loadNode(r.targetId)"
               @keydown.space.prevent="loadNode(r.targetId)"
               @mouseenter="showRelationPreview($event, r)"
@@ -163,7 +162,6 @@
               <div class="rel-title">{{ r.title }}</div>
               <div class="rel-foot">
                 <span class="rel-score">P={{ r.score.toFixed(1) }}</span>
-                <button class="rel-preview-btn" @click.stop="showRelationPreview($event, r)" aria-label="Preview relationship">ⓘ</button>
                 <button class="rel-del" @click.stop="dropEdge(r.edgeId)" title="Remove relation">✕</button>
               </div>
             </div>
@@ -981,6 +979,14 @@ function showRelationPreview(evt, relation) {
   prev.x = x;
   prev.y = y;
   prev.on = true;
+}
+
+function handleRelationCardClick(evt, relation) {
+  if (window.matchMedia('(hover: none)').matches) {
+    showRelationPreview(evt, relation);
+    return;
+  }
+  loadNode(relation.targetId);
 }
 
 function hidePrev() { prev.on = false; }

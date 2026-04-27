@@ -451,24 +451,6 @@ body {
 .rel-card:hover .rel-del { color: var(--dim); }
 .rel-del:hover { color: var(--danger) !important; background: var(--danger-d); }
 
-.rel-preview-btn {
-  margin-left: auto;
-  background: none;
-  border: none;
-  color: var(--dim);
-  cursor: pointer;
-  font-size: 12px;
-  padding: 2px 5px;
-  border-radius: 3px;
-  line-height: 1;
-}
-.rel-preview-btn:hover,
-.rel-preview-btn:focus-visible {
-  color: var(--accent);
-  background: var(--accent-d);
-  outline: none;
-}
-
 .rel-connectors {
   position: absolute;
   inset: 0;
