@@ -92,7 +92,7 @@
               <div class="rel-label-text rel-first-line">{{ r.firstLine }}</div>
               <div class="rel-foot">
                 <span class="rel-score">P={{ r.score.toFixed(1) }}</span>
-                <button class="rel-preview-btn" @click.stop="showRelationPreview($event, r)" title="Preview relationship" aria-label="Preview relationship">ⓘ</button>
+                <button class="rel-preview-btn" @click.stop="showRelationPreview($event, r)" aria-label="Preview relationship">ⓘ</button>
                 <button class="rel-del" @click.stop="dropEdge(r.edgeId)" title="Remove relation">✕</button>
               </div>
             </div>
@@ -163,7 +163,7 @@
               <div class="rel-title">{{ r.title }}</div>
               <div class="rel-foot">
                 <span class="rel-score">P={{ r.score.toFixed(1) }}</span>
-                <button class="rel-preview-btn" @click.stop="showRelationPreview($event, r)" title="Preview relationship" aria-label="Preview relationship">ⓘ</button>
+                <button class="rel-preview-btn" @click.stop="showRelationPreview($event, r)" aria-label="Preview relationship">ⓘ</button>
                 <button class="rel-del" @click.stop="dropEdge(r.edgeId)" title="Remove relation">✕</button>
               </div>
             </div>
@@ -661,7 +661,7 @@ function truncateText(text = '', maxLength) {
 
 function relationFirstLine(relationHtml, desc = '') {
   const richText = relationHtml ? richTextToPlainText(relationHtml) : '';
-  const plainText = richText || desc.replace(/\r\n/g, '\n').split('\n')[0]?.trim() || '';
+  const plainText = richText || desc.replace(/\r\n/g, '\n').split('\n')[0].trim() || '';
   return truncateText(plainText || 'Relationship', RELATION_CARD_FIRST_LINE_LENGTH);
 }
 
@@ -735,6 +735,13 @@ function connectorPath(x1, y1, x2, y2, relationSide) {
   return `M ${x1} ${y1} C ${x1 - curve} ${y1}, ${x2 + curve} ${y2}, ${x2} ${y2}`;
 }
 
+function connectorCenterVerticalOffset(centerHeight, cardMidpointY, centerTop) {
+  return Math.min(
+    centerHeight * CONNECTOR_CENTER_TARGET_RATIO,
+    Math.max(CONNECTOR_MIN_TARGET_OFFSET, cardMidpointY - centerTop)
+  );
+}
+
 function updateRelationConnectors() {
   const canvas = relationshipCanvasEl.value;
   const center = centerPanelEl.value;
@@ -756,11 +763,7 @@ function updateRelationConnectors() {
     const cardRect = card.getBoundingClientRect();
     const y1 = cardRect.top - canvasRect.top + cardRect.height / 2;
     const centerTop = centerRect.top - canvasRect.top;
-    const centerVerticalOffset = Math.min(
-      centerRect.height * CONNECTOR_CENTER_TARGET_RATIO,
-      Math.max(CONNECTOR_MIN_TARGET_OFFSET, y1 - centerTop)
-    );
-    const y2 = centerTop + centerVerticalOffset;
+    const y2 = centerTop + connectorCenterVerticalOffset(centerRect.height, y1, centerTop);
     const isIncoming = r.side === 'incoming';
     const x1 = (isIncoming ? cardRect.right : cardRect.left) - canvasRect.left;
     const x2 = (isIncoming ? centerRect.left : centerRect.right) - canvasRect.left;
