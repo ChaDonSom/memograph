@@ -103,6 +103,10 @@ const PAGE_HEIGHT_MIN = 118;
 const PAGE_HEIGHT_RANGE = 98;
 const HANDLE_COUNT = 7;
 const LAYOUT_PADDING = 56;
+// Outgoing/source pages should stay visible without out-sizing destination pages ranked by pScore.
+const FROM_NODE_SCORE_MULTIPLIER = 0.82;
+// Keep the focused page visually dominant even before it has many visits or weighted relations.
+const CURRENT_NODE_MIN_SCORE = 34;
 
 function clamp(value, min, max) {
   return Math.min(max, Math.max(min, value));
@@ -144,13 +148,13 @@ const nodeScores = computed(() => {
     const from = byId.get(edge.fromId);
     const to = byId.get(edge.toId);
     if (to) scores.set(to.id, Math.max(scores.get(to.id) || 0, pScore(edge, to)));
-    if (from) scores.set(from.id, Math.max(scores.get(from.id) || 0, pScore(edge, from) * 0.82));
+    if (from) scores.set(from.id, Math.max(scores.get(from.id) || 0, pScore(edge, from) * FROM_NODE_SCORE_MULTIPLIER));
   }
   for (const node of props.nodes) {
     const visitBoost = Math.log2((node.visits || 0) + 1) * 2;
     scores.set(node.id, Math.max(scores.get(node.id) || 0, visitBoost + DEFAULT_EDGE_WEIGHT));
   }
-  if (props.currentId) scores.set(props.currentId, Math.max(scores.get(props.currentId) || 0, 34));
+  if (props.currentId) scores.set(props.currentId, Math.max(scores.get(props.currentId) || 0, CURRENT_NODE_MIN_SCORE));
   return scores;
 });
 
