@@ -696,7 +696,7 @@ function richTextToPlainText(html = '') {
 
 function richTextFirstLine(html = '') {
   const doc = new DOMParser().parseFromString(html, 'text/html');
-  const blocks = doc.body.querySelectorAll('p, h1, h2, h3, li, blockquote, pre, div');
+  const blocks = doc.body.querySelectorAll('p, h1, h2, h3, li, blockquote, pre');
   for (const block of blocks) {
     const text = (block.textContent || '').replace(/\s+/g, ' ').trim();
     if (text) return text;
