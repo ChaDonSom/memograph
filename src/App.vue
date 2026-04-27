@@ -114,7 +114,7 @@
               <div class="rel-popover-body" v-html="line.relation.relationBodyHtml"></div>
               <div class="rel-popover-actions">
                 <button class="btn btn-ghost" @click="openEditRelationModal(line.relation)">Edit relation</button>
-                <button class="btn btn-danger" @click="dropEdge(line.relation.graphEdgeId || line.edgeId)">Delete relation</button>
+                <button class="btn btn-danger" @click="dropEdge(line.relation.graphEdgeId)">Delete relation</button>
               </div>
             </div>
           </div>
@@ -484,7 +484,6 @@ const REMOTE_CONNECTOR_LANE_GAP = 9;
 const REMOTE_CONNECTOR_MAX_LANES = 5;
 const REMOTE_CONNECTOR_LANE_CENTER_OFFSET = 2;
 const REMOTE_CONNECTOR_LABEL_Y_OFFSET = -8;
-const DJB2_HASH_INITIAL = 5381;
 
 const stored = loadGraph();
 const nodes = ref(stored.nodes);
@@ -665,12 +664,7 @@ function remoteHopAttenuation(hop) {
 }
 
 function stableTransitionToken(value) {
-  // djb2 is sufficient here: it keeps generated view-transition names short and stable for local edge IDs.
-  let hash = DJB2_HASH_INITIAL;
-  for (let i = 0; i < value.length; i++) {
-    hash = Math.imul(hash, 33) ^ value.charCodeAt(i);
-  }
-  return (hash >>> 0).toString(36);
+  return value.replace(/[^a-zA-Z0-9_-]/g, '-');
 }
 
 function relationTransitionKey(relation) {
@@ -1161,11 +1155,15 @@ function visibleRelations() {
 
 function relationCardForTarget(targetId, sourceRelation = null) {
   const sourceKey = sourceRelation ? relationTransitionKey(sourceRelation) : '';
-  const relations = visibleRelations();
-  const relation = relations.find(r =>
-    sourceKey && relationTransitionKey(r) === sourceKey && r.targetId === targetId
-  ) || relations.find(r => r.targetId === targetId);
-  return relation ? relationCardEls.get(relation.edgeId) : null;
+  let fallbackRelation = null;
+  for (const relation of visibleRelations()) {
+    if (relation.targetId !== targetId) continue;
+    if (sourceKey && relationTransitionKey(relation) === sourceKey) {
+      return relationCardEls.get(relation.edgeId);
+    }
+    fallbackRelation ??= relation;
+  }
+  return fallbackRelation ? relationCardEls.get(fallbackRelation.edgeId) : null;
 }
 
 function setCardTransitionName(relation, name, restoreFns) {
@@ -1315,7 +1313,7 @@ function openRelationEditorAfterModalUpdate() {
 }
 
 function openEditRelationModal(relation) {
-  const edge = findEdge(relation.graphEdgeId || relation.edgeId);
+  const edge = findEdge(relation.graphEdgeId);
   if (!edge) return;
   const isCurrentRelation = edge.fromId === currentId.value || edge.toId === currentId.value;
   const targetId = isCurrentRelation
