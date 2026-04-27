@@ -285,7 +285,7 @@
 
     <div class="field">
       <label>Direction</label>
-      <select v-model="modal.dir">
+      <select v-model="modal.dir" :disabled="modal.mode === 'edit'">
         <option value="out">This page → target (outgoing)</option>
         <option value="in">Target → this page (incoming)</option>
         <option value="bi" v-if="modal.mode === 'add'">Bidirectional</option>
@@ -737,8 +737,11 @@ function extractRelationPreview(relationHtml, desc = '') {
 }
 
 function relationBodyHtml(relationHtml, desc = '') {
+  const sanitizedRelationHtml = sanitizeRichHtml(relationHtml || '');
+  if (sanitizedRelationHtml) return sanitizedRelationHtml;
+
   const fallback = normalizeNewlines(desc).trim();
-  return relationHtml || `<p>${escapeHtml(fallback || 'No relationship details yet.')}</p>`;
+  return `<p>${escapeHtml(fallback || 'No relationship details yet.')}</p>`;
 }
 
 function extractPagePreview(node) {
@@ -925,13 +928,22 @@ function initEditor() {
   });
   const node = current.value;
   if (node?.bodyDelta) {
-    try {
-      editor.setContents(JSON.parse(node.bodyDelta));
-    } catch {
+    if (!restoreEditorContents(editor, node.bodyDelta)) {
       editor.setText(node.bodyDelta);
     }
   }
   editor.on('text-change', queueSave);
+}
+
+function restoreEditorContents(quill, serializedDelta) {
+  try {
+    const parsed = JSON.parse(serializedDelta);
+    quill.setContents(sanitizeRichDelta(parsed));
+    return true;
+  } catch (error) {
+    console.warn('Unable to restore saved editor contents; falling back to plain text.', error);
+    return false;
+  }
 }
 
 function initRelationEditor() {
@@ -947,10 +959,7 @@ function initRelationEditor() {
       },
     });
     if (modal.descDelta) {
-      try {
-        relEditor.setContents(JSON.parse(modal.descDelta));
-      } catch (error) {
-        console.warn('Unable to restore saved relationship editor contents; falling back to plain text.', error);
+      if (!restoreEditorContents(relEditor, modal.descDelta)) {
         relEditor.setText(modal.desc || '');
       }
     } else if (modal.desc) {
