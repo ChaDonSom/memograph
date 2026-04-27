@@ -762,10 +762,7 @@ function extractPageDetails(node) {
   const plainText = bodyHtml ? richTextToPlainText(bodyHtml) : '';
   if (plainText) return plainText;
 
-  const template = document.createElement('template');
-  template.innerHTML = bodyHtml;
-  const image = template.content.querySelector('img');
-  return image ? (image.getAttribute('alt') || image.getAttribute('title') || 'Image-only page.') : 'No page details yet.';
+  return /<img[\s>]/i.test(bodyHtml) ? 'Image-only page.' : 'No page details yet.';
 }
 
 function extractPageDetailsHtml(node) {
