@@ -300,7 +300,7 @@ const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 
 const DEFAULT_EDGE_WEIGHT = 5;
 const SAVE_DELAY_MS = 500;
 const MS_PER_DAY = 86_400_000;
-const RELATION_CARD_FIRST_LINE_LENGTH = 72;
+const RELATION_LABEL_TEXT_MAX_LENGTH = 72;
 // Truncation length for relationship names shown on connector labels.
 const CONNECTOR_LABEL_MAX_LENGTH = 54;
 const ARIA_LABEL_DETAILS_MAX_LENGTH = 140;
@@ -723,9 +723,9 @@ function truncateText(text = '', maxLength) {
   return text.length > maxLength ? `${text.slice(0, maxLength - 1).trimEnd()}…` : text;
 }
 
-function extractRelationPreview(relationHtml, desc = '') {
+function extractRelationLabel(relationHtml, desc = '') {
   const plainText = relationHtml ? richTextFirstLine(relationHtml) : firstNormalizedLine(desc);
-  return truncateText(plainText || 'Relationship', RELATION_CARD_FIRST_LINE_LENGTH);
+  return truncateText(plainText || 'Relationship', RELATION_LABEL_TEXT_MAX_LENGTH);
 }
 
 function formatRelationBodyHtml(relationHtml, desc = '') {
@@ -790,7 +790,7 @@ const rankedRelations = computed(() => {
       relationBodyHtml: formatRelationBodyHtml(relationHtml, e.desc),
       dir,
       side,
-      relationLabel: extractRelationPreview(relationHtml, e.desc),
+      relationLabel: extractRelationLabel(relationHtml, e.desc),
       pageDetails: extractPageDetails(t),
       pageMeta: `Edited ${timeAgo(t.updatedAt)} · ${(t.visits || 0)} visit${t.visits !== 1 ? 's' : ''}`,
       score: pScore(e, t),
