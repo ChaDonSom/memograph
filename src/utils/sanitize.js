@@ -82,9 +82,8 @@ export function sanitizeRichHtml(html = '') {
       return;
     }
 
-    // Child cleanup can remove or lift nodes, so snapshot the live collection
-    // before mutating the subtree. Disallowed wrapper elements are handled
-    // after this so their children are safe before being lifted.
+    // Snapshot the live collection because cleaning descendants or lifting this
+    // wrapper below may mutate the subtree while we iterate.
     for (const child of [...element.children]) {
       cleanNode(child);
     }

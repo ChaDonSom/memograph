@@ -699,7 +699,7 @@ const hop2Incoming = computed(() => {
           pageDetailsHtml: pageHtml,
           pageMeta: `Edited ${timeAgo(node.updatedAt)} \u00b7 ${node.visits || 0} visit${node.visits !== 1 ? 's' : ''}`,
           dir: '\u2190 2-hop',
-          side: 'incoming',
+          side: 'incoming', // Connector positioning uses this to choose arrow endpoints.
         });
       }
     }
@@ -740,7 +740,7 @@ const hop2Outgoing = computed(() => {
           pageDetailsHtml: pageHtml,
           pageMeta: `Edited ${timeAgo(node.updatedAt)} \u00b7 ${node.visits || 0} visit${node.visits !== 1 ? 's' : ''}`,
           dir: '\u2192 2-hop',
-          side: 'outgoing',
+          side: 'outgoing', // Connector positioning uses this to choose arrow endpoints.
         });
       }
     }
