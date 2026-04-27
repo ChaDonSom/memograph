@@ -33,19 +33,32 @@
       <input v-model="search" placeholder="Search pages…" />
     </div>
 
-    <div class="s-list">
-      <div
-        v-for="n in filteredNodes"
+      <div class="s-list">
+        <div
+          v-for="n in filteredNodes"
         :key="n.id"
         class="n-item"
         :class="{ active: n.id === currentId }"
         @click="navigateToNode(n.id)"
       >{{ n.title || '(untitled)' }}</div>
-    </div>
+      </div>
 
-    <div class="s-foot">
-      <button class="btn-new" @click="createNode">+ New Page</button>
-      <button class="btn-icon" title="Import JSON" @click="triggerImportData">↑</button>
+      <div class="s-view-toggle" aria-label="Main view">
+        <button
+          type="button"
+          :class="{ active: mainView === 'editor' }"
+          @click="selectMainView('editor')"
+        >Editor</button>
+        <button
+          type="button"
+          :class="{ active: mainView === 'graph' }"
+          @click="selectMainView('graph')"
+        >Graph</button>
+      </div>
+
+      <div class="s-foot">
+        <button class="btn-new" @click="createNode">+ New Page</button>
+        <button class="btn-icon" title="Import JSON" @click="triggerImportData">↑</button>
       <button class="btn-icon" title="Export JSON" @click="exportData">↓</button>
     </div>
   </div>
@@ -61,7 +74,7 @@
   />
 
   <!-- ── Main: editor ─────────────────────────── -->
-  <div class="main" v-if="current">
+  <div class="main" v-if="current && mainView === 'editor'">
     <div class="main-scroll" ref="mainScrollEl">
       <div class="relationship-canvas" ref="relationshipCanvasEl">
         <svg
@@ -351,6 +364,17 @@
     </div>
   </div>
 
+  <!-- ── Main: graph library preview ─────────────── -->
+  <div class="main" v-else-if="current && mainView === 'graph'">
+    <GraphView
+      :nodes="nodes"
+      :edges="edges"
+      :current-id="currentId"
+      @navigate="navigateToNode"
+      @add-relation="openModal"
+    />
+  </div>
+
   <!-- ── Main: empty state ────────────────────── -->
   <div class="main" v-else>
     <div class="empty">
@@ -438,6 +462,7 @@
 <script setup>
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue';
 import Quill from 'quill';
+import GraphView from './components/GraphView.vue';
 import { loadGraph, saveGraph } from './services/graphRepository.js';
 import { imageUploadHandler } from './utils/imageCompression.js';
 import {
@@ -528,6 +553,7 @@ const currentId = ref(null);
 const search = ref('');
 const listOpen = ref(false);
 const sidebarCollapsed = ref(false);
+const mainView = ref('editor');
 const sidebarEl = ref(null);
 const mainScrollEl = ref(null);
 const relationshipCanvasEl = ref(null);
@@ -1144,6 +1170,19 @@ function scheduleConnectorUpdate() {
     connectorFrame = null;
     updateRelationConnectors();
   });
+}
+
+async function selectMainView(view) {
+  if (mainView.value === view) return;
+  if (mainView.value === 'editor') flush();
+  mainView.value = view;
+  if (view === 'editor') {
+    await nextTick();
+    initEditor();
+    observeConnectorTargets();
+    addConnectorScrollListener();
+    scheduleConnectorUpdate();
+  }
 }
 
 function observeConnectorTargets() {
