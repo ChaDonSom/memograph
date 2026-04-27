@@ -774,6 +774,11 @@ function latestUpdatedNode() {
   , null);
 }
 
+async function loadLatestNode() {
+  const latest = latestUpdatedNode();
+  if (latest) await loadNode(latest.id);
+}
+
 function relationAriaLabel(relation) {
   const details = truncateText(decodeHtmlEntities(relation.pageDetails), ARIA_LABEL_DETAILS_MAX_LENGTH);
   return `${relation.dir} ${relation.title}. ${details}. Press Enter or Space to open related page.`;
@@ -1249,8 +1254,7 @@ async function importDataFromFile(event) {
 
     await nextTick();
     if (nodes.value.length) {
-      const latest = latestUpdatedNode();
-      if (latest) await loadNode(latest.id);
+      await loadLatestNode();
     } else {
       scheduleConnectorUpdate();
     }
@@ -1298,8 +1302,7 @@ onMounted(async () => {
   addConnectorScrollListener();
 
   if (nodes.value.length) {
-    const latest = latestUpdatedNode();
-    if (latest) await loadNode(latest.id);
+    await loadLatestNode();
   }
   scheduleConnectorUpdate();
 });
