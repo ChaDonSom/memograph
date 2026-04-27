@@ -765,7 +765,7 @@ function extractPageDetailsFromHtml(bodyHtml) {
   const plainText = bodyHtml ? richTextToPlainText(bodyHtml) : '';
   if (plainText) return plainText;
 
-  return /<img[\s>]/i.test(bodyHtml) ? 'Image-only page.' : 'No page details yet.';
+  return /<img\s[^>]*>|<img>/i.test(bodyHtml) ? 'Image-only page.' : 'No page details yet.';
 }
 
 function latestUpdatedNode() {
@@ -1209,7 +1209,7 @@ function triggerImportData() {
 function parseImportedGraph(raw) {
   const parsed = JSON.parse(raw);
   if (!parsed || typeof parsed !== 'object' || !Array.isArray(parsed.nodes) || !Array.isArray(parsed.edges)) {
-    throw new Error('Import must be a JSON object with nodes and edges arrays.');
+    throw new Error('Import must be a JSON object with "nodes" and "edges" arrays.');
   }
 
   const nodeIds = new Set();
@@ -1260,7 +1260,7 @@ async function importDataFromFile(event) {
     }
   } catch (error) {
     console.warn('Unable to import Memograph data.', error);
-    alert('Unable to import that file. Choose a Memograph JSON export with nodes and edges arrays.');
+    alert(`Unable to import that file. ${error.message || 'Choose a Memograph JSON export with nodes and edges arrays.'}`);
   }
 }
 
