@@ -1203,7 +1203,7 @@ function triggerImportData() {
 
 function parseImportedGraph(raw) {
   const parsed = JSON.parse(raw);
-  if (!parsed || Array.isArray(parsed) || typeof parsed !== 'object' || !Array.isArray(parsed.nodes) || !Array.isArray(parsed.edges)) {
+  if (!parsed || typeof parsed !== 'object' || !Array.isArray(parsed.nodes) || !Array.isArray(parsed.edges)) {
     throw new Error('Import must be a JSON object with nodes and edges arrays.');
   }
 
