@@ -460,9 +460,8 @@
 </template>
 
 <script setup>
-import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue';
+import { computed, defineAsyncComponent, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue';
 import Quill from 'quill';
-import GraphView from './components/GraphView.vue';
 import { loadGraph, saveGraph } from './services/graphRepository.js';
 import { imageUploadHandler } from './utils/imageCompression.js';
 import {
@@ -483,6 +482,8 @@ import {
   truncateText,
 } from './utils/text.js';
 import { DEFAULT_EDGE_WEIGHT, pScore, timeAgo } from './utils/scoring.js';
+
+const GraphView = defineAsyncComponent(() => import('./components/GraphView.vue'));
 
 // Extend Quill's Image blot to persist a width style attribute.
 const BaseImageBlot = Quill.import('formats/image');
