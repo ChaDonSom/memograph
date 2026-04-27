@@ -462,6 +462,7 @@ const REMOTE_MIN_SCORE = 4;
 const REMOTE_MAX_CARDS_PER_SIDE = 36;
 const CARD_SCORE_LOW = 12;
 const CARD_SCORE_HIGH = 30;
+const remoteHopDecayCache = new Map([[1, 1]]);
 
 const stored = loadGraph();
 const nodes = ref(stored.nodes);
@@ -623,6 +624,13 @@ function relationCardStyle(relation) {
   };
 }
 
+function remoteHopAttenuation(hop) {
+  if (!remoteHopDecayCache.has(hop)) {
+    remoteHopDecayCache.set(hop, REMOTE_HOP_DECAY * remoteHopAttenuation(hop - 1));
+  }
+  return remoteHopDecayCache.get(hop);
+}
+
 function findNode(id) {
   return nodes.value.find(n => n.id === id) ?? null;
 }
@@ -709,7 +717,7 @@ const edgeLookups = computed(() => {
 });
 
 function remoteRelationCandidate(edge, node, parent, hop, side) {
-  const score = pScore(edge, node) * Math.pow(REMOTE_HOP_DECAY, hop - 1);
+  const score = pScore(edge, node) * remoteHopAttenuation(hop);
   const pageHtml = pageDetailsHtml(node);
   return {
     edgeId: `${side}-hop${hop}-${edge.id}`,
@@ -721,7 +729,7 @@ function remoteRelationCandidate(edge, node, parent, hop, side) {
     pageDetails: extractPageDetailsFromHtml(pageHtml),
     pageDetailsHtml: pageHtml,
     pageMeta: `Edited ${timeAgo(node.updatedAt)} \u00b7 ${node.visits || 0} visit${node.visits !== 1 ? 's' : ''}`,
-    dir: side === 'incoming' ? `\u2190 ${hop}-hop` : `\u2192 ${hop}-hop`,
+    dir: side === 'incoming' ? `\u2190 ${hop} steps away` : `\u2192 ${hop} steps away`,
     side,
   };
 }
@@ -1069,6 +1077,9 @@ async function navigateToNode(id, sourceEl = null) {
 
   const previousId = currentId.value;
   const oldCenter = centerPanelEl.value;
+  const sourceTransitionName = sourceEl?.style.viewTransitionName ?? '';
+  const oldCenterTransitionName = oldCenter?.style.viewTransitionName ?? '';
+  let oldPageCardTransitionName = '';
   if (sourceEl) {
     sourceEl.style.viewTransitionName = 'page-center';
     if (oldCenter) oldCenter.style.viewTransitionName = 'page-card';
@@ -1084,16 +1095,19 @@ async function navigateToNode(id, sourceEl = null) {
     if (centerPanelEl.value) centerPanelEl.value.style.viewTransitionName = 'page-center';
     if (sourceEl && previousId) {
       oldPageCard = relationCardForTarget(previousId);
-      if (oldPageCard) oldPageCard.style.viewTransitionName = 'page-card';
+      if (oldPageCard) {
+        oldPageCardTransitionName = oldPageCard.style.viewTransitionName;
+        oldPageCard.style.viewTransitionName = 'page-card';
+      }
     }
   });
 
   try {
     await transition.finished;
   } finally {
-    if (sourceEl) sourceEl.style.viewTransitionName = '';
-    if (oldCenter) oldCenter.style.viewTransitionName = 'none';
-    if (oldPageCard) oldPageCard.style.viewTransitionName = '';
+    if (sourceEl) sourceEl.style.viewTransitionName = sourceTransitionName;
+    if (oldCenter) oldCenter.style.viewTransitionName = oldCenterTransitionName;
+    if (oldPageCard) oldPageCard.style.viewTransitionName = oldPageCardTransitionName;
     if (centerPanelEl.value) centerPanelEl.value.style.viewTransitionName = 'none';
   }
 }
