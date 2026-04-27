@@ -114,7 +114,7 @@
               <div class="rel-popover-body" v-html="line.relation.relationBodyHtml"></div>
               <div class="rel-popover-actions">
                 <button class="btn btn-ghost" @click="openEditRelationModal(line.relation)">Edit relation</button>
-                <button class="btn btn-danger" @click="dropEdge(line.relation.graphEdgeId)">Delete relation</button>
+                <button class="btn btn-danger" @click="dropRelationEdge(line.relation)">Delete relation</button>
               </div>
             </div>
           </div>
@@ -873,7 +873,7 @@ function connectorPath(startX, startY, endX, endY) {
 }
 
 function remoteConnectorLaneX(isIncoming, endpointX, centerRect, canvasRect, laneIndex) {
-  // Distribute lanes around zero (-2..2) so adjacent remote arrows do not sit on the same track.
+  // Distribute lane units around zero (-2..2), then scale them into pixel offsets.
   const laneOffset = (laneIndex % REMOTE_CONNECTOR_MAX_LANES - REMOTE_CONNECTOR_LANE_CENTER_OFFSET) * REMOTE_CONNECTOR_LANE_GAP;
   if (isIncoming) {
     const whitespaceEdge = centerRect.left - canvasRect.left - REMOTE_CONNECTOR_LABEL_X_OFFSET;
@@ -1316,6 +1316,7 @@ function openEditRelationModal(relation) {
   const edge = findEdge(relation.graphEdgeId);
   if (!edge) return;
   const isCurrentRelation = edge.fromId === currentId.value || edge.toId === currentId.value;
+  // Remote connector labels edit the actual edge direction, so the picker represents the edge's to-node.
   const targetId = isCurrentRelation
     ? relation.targetId
     : edge.toId;
@@ -1411,6 +1412,10 @@ function dropEdge(eid) {
     relPopover.pinned = false;
   }
   scheduleConnectorUpdate();
+}
+
+function dropRelationEdge(relation) {
+  if (relation.graphEdgeId) dropEdge(relation.graphEdgeId);
 }
 
 function showRelationPopover(edgeId) {
