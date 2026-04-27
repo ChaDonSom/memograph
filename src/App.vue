@@ -114,15 +114,11 @@
               :aria-label="r.ariaLabel"
               @click="handleRelationCardClick($event, r)"
               @keydown.enter.self.prevent="loadNode(r.targetId)"
-              @keydown.space.self.prevent="showPagePreview(r.targetId, $event)"
-              @mouseenter="showPagePreview(r.targetId, $event)"
-              @mouseleave="hidePrev"
-              @focusin="showPagePreview(r.targetId, $event)"
-              @focusout="hidePrev"
+              @keydown.space.self.prevent="loadNode(r.targetId)"
             >
               <div class="rel-dir">{{ r.dir }}</div>
               <div class="rel-title">{{ r.title }}</div>
-              <div class="rel-label-text rel-first-line">{{ r.pagePreview }}</div>
+              <div class="rel-label-text rel-page-details">{{ r.pageDetails }}</div>
               <div class="rel-foot">
                 <span class="rel-score">P={{ r.score.toFixed(1) }}</span>
                 <span class="rel-page-meta">{{ r.pageMeta }}</span>
@@ -189,15 +185,11 @@
               :aria-label="r.ariaLabel"
               @click="handleRelationCardClick($event, r)"
               @keydown.enter.self.prevent="loadNode(r.targetId)"
-              @keydown.space.self.prevent="showPagePreview(r.targetId, $event)"
-              @mouseenter="showPagePreview(r.targetId, $event)"
-              @mouseleave="hidePrev"
-              @focusin="showPagePreview(r.targetId, $event)"
-              @focusout="hidePrev"
+              @keydown.space.self.prevent="loadNode(r.targetId)"
             >
               <div class="rel-dir">{{ r.dir }}</div>
               <div class="rel-title">{{ r.title }}</div>
-              <div class="rel-label-text rel-first-line">{{ r.pagePreview }}</div>
+              <div class="rel-label-text rel-page-details">{{ r.pageDetails }}</div>
               <div class="rel-foot">
                 <span class="rel-score">P={{ r.score.toFixed(1) }}</span>
                 <span class="rel-page-meta">{{ r.pageMeta }}</span>
@@ -224,17 +216,6 @@
     </div>
   </div>
 
-</div>
-
-<!-- ── Hover preview ────────────────────────── -->
-<div
-  class="preview"
-  v-show="prev.on"
-  :style="{ top: prev.y + 'px', left: prev.x + 'px' }"
->
-  <div class="preview-title">{{ prev.title }}</div>
-  <div class="preview-body" v-html="prev.html"></div>
-  <div class="preview-fade"></div>
 </div>
 
 <!-- ── Add relation modal ────────────────────── -->
@@ -319,12 +300,7 @@ const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 
 const DEFAULT_EDGE_WEIGHT = 5;
 const SAVE_DELAY_MS = 500;
 const MS_PER_DAY = 86_400_000;
-const PREVIEW_WIDTH = 300;
-const PREVIEW_GUTTER = 18;
-const PREVIEW_HEIGHT_WITH_GUTTER = 230;
 const RELATION_CARD_FIRST_LINE_LENGTH = 72;
-// Truncation length for related page body previews shown in side cards.
-const RELATED_PAGE_PREVIEW_LENGTH = 96;
 // Truncation length for relationship names shown on connector labels.
 const CONNECTOR_LABEL_MAX_LENGTH = 54;
 const CONNECTOR_CENTER_TARGET_RATIO = 0.42;
@@ -418,7 +394,6 @@ const modal = reactive({
   desc: '',
   descDelta: '',
 });
-const prev = reactive({ on: false, edgeId: '', targetId: '', title: '', html: '', x: 0, y: 0 });
 const relPopover = reactive({ edgeId: '', pinned: false });
 
 // ── Derived ───────────────────────────────────────────────────────────
@@ -718,6 +693,17 @@ function richTextToPlainText(html = '') {
   return (template.content.textContent || '').replace(/\s+/g, ' ').trim();
 }
 
+function richTextFirstLine(html = '') {
+  const template = document.createElement('template');
+  template.innerHTML = html;
+  const blocks = template.content.querySelectorAll('p, h1, h2, h3, li, blockquote, pre, div');
+  for (const block of blocks) {
+    const text = (block.textContent || '').replace(/\s+/g, ' ').trim();
+    if (text) return text;
+  }
+  return firstNormalizedLine(template.content.textContent || '');
+}
+
 function decodeHtmlEntities(text = '') {
   const textarea = document.createElement('textarea');
   textarea.innerHTML = text;
@@ -738,8 +724,7 @@ function truncateText(text = '', maxLength) {
 }
 
 function extractRelationPreview(relationHtml, desc = '') {
-  const richText = relationHtml ? richTextToPlainText(relationHtml) : '';
-  const plainText = richText || firstNormalizedLine(desc) || '';
+  const plainText = relationHtml ? richTextFirstLine(relationHtml) : firstNormalizedLine(desc);
   return truncateText(plainText || 'Relationship', RELATION_CARD_FIRST_LINE_LENGTH);
 }
 
@@ -751,14 +736,14 @@ function formatRelationBodyHtml(relationHtml, desc = '') {
   return `<p>${escapeHtml(fallback || 'No relationship details yet.')}</p>`;
 }
 
-function extractPagePreview(node) {
+function extractPageDetails(node) {
   const plainText = node.bodyHtml ? richTextToPlainText(node.bodyHtml) : '';
-  return truncateText(plainText || 'No page details yet.', RELATED_PAGE_PREVIEW_LENGTH);
+  return plainText || 'No page details yet.';
 }
 
 function relationAriaLabel(relation) {
-  const preview = decodeHtmlEntities(relation.pagePreview);
-  return `${relation.dir} ${relation.title}. ${preview}. Press Space to preview related page details; press Enter to open related page.`;
+  const details = truncateText(decodeHtmlEntities(relation.pageDetails), 140);
+  return `${relation.dir} ${relation.title}. ${details}. Press Enter or Space to open related page.`;
 }
 
 function findNode(id) {
@@ -806,7 +791,7 @@ const rankedRelations = computed(() => {
       dir,
       side,
       relationLabel: extractRelationPreview(relationHtml, e.desc),
-      pagePreview: extractPagePreview(t),
+      pageDetails: extractPageDetails(t),
       pageMeta: `Edited ${timeAgo(t.updatedAt)} · ${(t.visits || 0)} visit${t.visits !== 1 ? 's' : ''}`,
       score: pScore(e, t),
     };
@@ -1170,40 +1155,10 @@ function toggleRelationPopover(edgeId) {
   relPopover.pinned = true;
 }
 
-// ── Hover preview ─────────────────────────────────────────────────────
-function showPagePreview(tid, evt) {
-  const t = findNode(tid);
-  if (!t) return;
-  const rect = evt.currentTarget.getBoundingClientRect();
-  const x = Math.min(rect.right + 12, window.innerWidth - PREVIEW_WIDTH - PREVIEW_GUTTER);
-  const y = Math.max(8, Math.min(rect.top, window.innerHeight - PREVIEW_HEIGHT_WITH_GUTTER));
-  prev.edgeId = '';
-  prev.targetId = tid;
-  prev.title = t.title || '(untitled)';
-  prev.html = sanitizeRichHtml(t.bodyHtml || '') || '<em style="opacity:.45">No content yet.</em>';
-  prev.x = x;
-  prev.y = y;
-  prev.on = true;
-}
-
-function handleRelationCardClick(evt, relation) {
-  if (window.matchMedia('(hover: none)').matches) {
-    if (prev.on && prev.targetId === relation.targetId) {
-      loadNode(relation.targetId);
-      return;
-    }
-    relPopover.edgeId = '';
-    relPopover.pinned = false;
-    showPagePreview(relation.targetId, evt);
-    return;
-  }
+function handleRelationCardClick(_evt, relation) {
+  relPopover.edgeId = '';
+  relPopover.pinned = false;
   loadNode(relation.targetId);
-}
-
-function hidePrev() {
-  prev.on = false;
-  prev.edgeId = '';
-  prev.targetId = '';
 }
 
 // ── Export ────────────────────────────────────────────────────────────
