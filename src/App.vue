@@ -114,10 +114,10 @@
               :aria-label="r.ariaLabel"
               @click="handleRelationCardClick($event, r)"
               @keydown.enter.self.prevent="loadNode(r.targetId)"
-              @keydown.space.self.prevent="showPrev($event, r.targetId)"
-              @mouseenter="showPrev($event, r.targetId)"
+              @keydown.space.self.prevent="showPrev(r.targetId, $event)"
+              @mouseenter="showPrev(r.targetId, $event)"
               @mouseleave="hidePrev"
-              @focusin="showPrev($event, r.targetId)"
+              @focusin="showPrev(r.targetId, $event)"
               @focusout="hidePrev"
             >
               <div class="rel-dir">{{ r.dir }}</div>
@@ -189,10 +189,10 @@
               :aria-label="r.ariaLabel"
               @click="handleRelationCardClick($event, r)"
               @keydown.enter.self.prevent="loadNode(r.targetId)"
-              @keydown.space.self.prevent="showPrev($event, r.targetId)"
-              @mouseenter="showPrev($event, r.targetId)"
+              @keydown.space.self.prevent="showPrev(r.targetId, $event)"
+              @mouseenter="showPrev(r.targetId, $event)"
               @mouseleave="hidePrev"
-              @focusin="showPrev($event, r.targetId)"
+              @focusin="showPrev(r.targetId, $event)"
               @focusout="hidePrev"
             >
               <div class="rel-dir">{{ r.dir }}</div>
@@ -690,7 +690,7 @@ function sanitizeRichDelta(delta) {
 }
 
 function splitRelationDescription(desc = '') {
-  const [label = '', ...detailLines] = desc.replace(/\r\n/g, '\n').split('\n');
+  const [label = '', ...detailLines] = normalizeNewlines(desc).split('\n');
   return {
     label: label.trim(),
     detail: detailLines.join('\n').replace(/\s+$/, ''),
@@ -723,7 +723,11 @@ function truncateText(text = '', maxLength) {
 }
 
 function firstNormalizedLine(text = '') {
-  return text.replace(/\r\n/g, '\n').split('\n')[0].trim();
+  return normalizeNewlines(text).split('\n')[0].trim();
+}
+
+function normalizeNewlines(text = '') {
+  return text.replace(/\r\n/g, '\n');
 }
 
 function extractRelationPreview(relationHtml, desc = '') {
@@ -733,7 +737,7 @@ function extractRelationPreview(relationHtml, desc = '') {
 }
 
 function relationBodyHtml(relationHtml, desc = '') {
-  const fallback = desc.replace(/\r\n/g, '\n').trim();
+  const fallback = normalizeNewlines(desc).trim();
   return relationHtml || `<p>${escapeHtml(fallback || 'No relationship details yet.')}</p>`;
 }
 
@@ -1149,7 +1153,7 @@ function toggleRelationPopover(edgeId) {
 }
 
 // ── Hover preview ─────────────────────────────────────────────────────
-function showPrev(evt, tid) {
+function showPrev(tid, evt) {
   const t = findNode(tid);
   if (!t) return;
   const rect = evt.currentTarget.getBoundingClientRect();
@@ -1170,7 +1174,7 @@ function handleRelationCardClick(evt, relation) {
       loadNode(relation.targetId);
       return;
     }
-    showPrev(evt, relation.targetId);
+    showPrev(relation.targetId, evt);
     return;
   }
   loadNode(relation.targetId);
