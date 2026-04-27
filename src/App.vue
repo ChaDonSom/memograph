@@ -481,6 +481,7 @@ const REMOTE_CONNECTOR_LABEL_X_OFFSET = 8;
 const REMOTE_CONNECTOR_MIN_ARC = 46;
 const REMOTE_CONNECTOR_LANE_GAP = 9;
 const REMOTE_CONNECTOR_MAX_LANES = 5;
+const REMOTE_CONNECTOR_LANE_CENTER_OFFSET = 2;
 const REMOTE_CONNECTOR_LABEL_Y_OFFSET = -8;
 const DJB2_HASH_INITIAL = 5381;
 
@@ -580,7 +581,7 @@ const modalDirectionLabel = computed(() => {
   if (modal.mode === 'edit' && modal.editFromId && modal.editToId) {
     const from = findNode(modal.editFromId);
     const to = findNode(modal.editToId);
-    return `${from?.title || '(untitled)'} \u2192 ${to?.title || '(untitled)'}`;
+    if (from && to) return `${from.title || '(untitled)'} \u2192 ${to.title || '(untitled)'}`;
   }
   if (modal.dir === 'in') return 'Target \u2192 this page (incoming)';
   if (modal.dir === 'bi') return 'Bidirectional';
@@ -876,7 +877,7 @@ function connectorPath(startX, startY, endX, endY) {
 }
 
 function remoteConnectorLaneX(isIncoming, endpointX, centerRect, canvasRect, laneIndex) {
-  const laneOffset = (laneIndex % REMOTE_CONNECTOR_MAX_LANES - 2) * REMOTE_CONNECTOR_LANE_GAP;
+  const laneOffset = (laneIndex % REMOTE_CONNECTOR_MAX_LANES - REMOTE_CONNECTOR_LANE_CENTER_OFFSET) * REMOTE_CONNECTOR_LANE_GAP;
   if (isIncoming) {
     const whitespaceEdge = centerRect.left - canvasRect.left - REMOTE_CONNECTOR_LABEL_X_OFFSET;
     return Math.min(whitespaceEdge, endpointX + REMOTE_CONNECTOR_MIN_ARC + laneOffset);
@@ -1309,12 +1310,13 @@ function openRelationEditorAfterModalUpdate() {
 
 function openEditRelationModal(relation) {
   const edge = findEdge(relation.graphEdgeId || relation.edgeId);
+  if (!edge) return;
   const isCurrentRelation = edge && (edge.fromId === currentId.value || edge.toId === currentId.value);
   const targetId = isCurrentRelation
     ? relation.targetId
-    : edge?.toId;
+    : edge.toId;
   const target = findNode(targetId);
-  if (!edge || !target) return;
+  if (!target) return;
   Object.assign(modal, {
     on: true,
     mode: 'edit',
@@ -1342,6 +1344,7 @@ function closeModal() {
 function selectModalTarget(node) {
   modal.targetId = node.id;
   modal.targetSearch = node.title || '';
+  // Remote relation edits keep their original source and update only the selected target.
   if (modal.editFromId) modal.editToId = node.id;
 }
 
@@ -1350,15 +1353,24 @@ function createModalTarget() {
   selectModalTarget(node);
 }
 
+function relationEndpointsForSave() {
+  const cid = currentId.value;
+  if (modal.editFromId) {
+    return { from: modal.editFromId, to: modal.editToId };
+  }
+  return {
+    from: modal.dir === 'in' ? modal.targetId : cid,
+    to: modal.dir === 'in' ? cid : modal.targetId,
+  };
+}
+
 function saveRel() {
   if (!modal.targetId) return;
   if (!relEditor) {
     modal.editorError = 'Unable to save because the relationship editor is unavailable. Close this dialog and try again, or refresh the page if the problem continues.';
     return;
   }
-  const cid = currentId.value;
-  const from = modal.editFromId || (modal.dir === 'in' ? modal.targetId : cid);
-  const to = modal.editFromId ? modal.editToId : (modal.dir === 'in' ? cid : modal.targetId);
+  const { from, to } = relationEndpointsForSave();
   const desc = relEditor.getText().trim();
   const descDelta = JSON.stringify(sanitizeRichDelta(relEditor.getContents()));
   const descHtml = sanitizeRichHtml(normalizeEditorHtml(relEditor.root.innerHTML));
