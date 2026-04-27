@@ -1260,7 +1260,7 @@ async function importDataFromFile(event) {
     }
   } catch (error) {
     console.warn('Unable to import Memograph data.', error);
-    alert(`Unable to import that file. ${error.message || 'Choose a Memograph JSON export with nodes and edges arrays.'}`);
+    alert(`Unable to import that file. ${error.message || 'The file must be a valid Memograph JSON export with nodes and edges arrays.'}`);
   }
 }
 
