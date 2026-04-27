@@ -2,7 +2,7 @@
 <div class="layout">
 
   <!-- ── Sidebar ──────────────────────────────── -->
-  <div class="sidebar" ref="sidebarEl" :class="{ 'list-open': listOpen }">
+  <div class="sidebar" ref="sidebarEl" :class="{ 'list-open': listOpen, collapsed: sidebarCollapsed }">
 
     <!-- Compact bar: one row with search + count + new-page (mobile, stuck only) -->
     <div class="s-compact-bar">
@@ -22,6 +22,11 @@
         Memograph
       </div>
       <span class="n-count">{{ nodes.length }}</span>
+      <button
+        class="btn-icon btn-collapse-sidebar"
+        :title="sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'"
+        @click="sidebarCollapsed = !sidebarCollapsed"
+      >{{ sidebarCollapsed ? '›' : '‹' }}</button>
     </div>
 
     <div class="s-search">
@@ -147,6 +152,32 @@
             </div>
           </div>
           <div class="rel-empty" v-else>No incoming relations.</div>
+          <!-- 2-hop incoming neighbours (half-size) -->
+          <div v-if="hop2Incoming.length" class="rel-column rel-column--hop2">
+            <div class="rel-hop-label">2nd-hop incoming</div>
+            <div
+              v-for="r in hop2Incoming"
+              :key="r.edgeId"
+              class="rel-card rel-card--side rel-card--hop2"
+              role="button"
+              tabindex="0"
+              @click="loadNode(r.targetId)"
+              @keydown.enter.prevent="loadNode(r.targetId)"
+            >
+              <div class="rel-dir">{{ r.dir }}</div>
+              <div class="rel-title">{{ r.title }}</div>
+              <div
+                v-if="r.pageDetailsHtml"
+                class="rel-page-details rel-page-preview rel-rich"
+                v-html="r.pageDetailsHtml"
+              ></div>
+              <div v-else class="rel-label-text rel-page-details">{{ r.pageDetails }}</div>
+              <div class="rel-foot">
+                <span class="rel-score">P={{ r.score.toFixed(1) }}</span>
+                <span class="rel-page-meta">{{ r.pageMeta }}</span>
+              </div>
+            </div>
+          </div>
         </section>
 
         <section class="resource-panel" ref="centerPanelEl" aria-label="Current page">
@@ -165,8 +196,20 @@
           </div>
 
           <!-- Quill editor -->
-          <div class="editor-wrap">
+          <div class="editor-wrap" style="position: relative;">
             <div id="qeditor"></div>
+            <!-- Image resize toolbar -->
+            <div
+              v-if="imageResizeBar.visible"
+              class="img-resize-bar"
+              :style="{ top: imageResizeBar.top + 'px', left: imageResizeBar.left + 'px' }"
+              @mousedown.prevent
+            >
+              <button @click="resizeSelectedImage(25)">25%</button>
+              <button @click="resizeSelectedImage(50)">50%</button>
+              <button @click="resizeSelectedImage(75)">75%</button>
+              <button @click="resizeSelectedImage(100)">Full</button>
+            </div>
           </div>
 
           <!-- Relations -->
@@ -223,6 +266,32 @@
             </div>
           </div>
           <div class="rel-empty" v-else>No outgoing relations.</div>
+          <!-- 2-hop outgoing neighbours (half-size) -->
+          <div v-if="hop2Outgoing.length" class="rel-column rel-column--hop2">
+            <div class="rel-hop-label">2nd-hop outgoing</div>
+            <div
+              v-for="r in hop2Outgoing"
+              :key="r.edgeId"
+              class="rel-card rel-card--side rel-card--hop2"
+              role="button"
+              tabindex="0"
+              @click="loadNode(r.targetId)"
+              @keydown.enter.prevent="loadNode(r.targetId)"
+            >
+              <div class="rel-dir">{{ r.dir }}</div>
+              <div class="rel-title">{{ r.title }}</div>
+              <div
+                v-if="r.pageDetailsHtml"
+                class="rel-page-details rel-page-preview rel-rich"
+                v-html="r.pageDetailsHtml"
+              ></div>
+              <div v-else class="rel-label-text rel-page-details">{{ r.pageDetails }}</div>
+              <div class="rel-foot">
+                <span class="rel-score">P={{ r.score.toFixed(1) }}</span>
+                <span class="rel-page-meta">{{ r.pageMeta }}</span>
+              </div>
+            </div>
+          </div>
         </section>
       </div>
     </div>
@@ -316,44 +385,52 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue';
 import Quill from 'quill';
 import { loadGraph, saveGraph } from './services/graphRepository.js';
+import { imageUploadHandler } from './utils/imageCompression.js';
+import {
+  RICH_CONTENT_TOOLBAR,
+  sanitizeRichHtml,
+  sanitizeRichDelta,
+  normalizeEditorHtml,
+} from './utils/sanitize.js';
+import {
+  normalizeNewlines,
+  firstNormalizedLine,
+  splitRelationDescription,
+  richTextToPlainText,
+  richTextFirstLine,
+  decodeHtmlEntities,
+  escapeHtml,
+  truncateText,
+} from './utils/text.js';
+import { DEFAULT_EDGE_WEIGHT, MS_PER_DAY, pScore, timeAgo } from './utils/scoring.js';
+
+// Extend Quill's Image blot to persist a width style attribute.
+const BaseImageBlot = Quill.import('formats/image');
+class ResizableImageBlot extends BaseImageBlot {
+  static formats(node) {
+    const formats = super.formats(node);
+    if (node.style.width) formats.width = node.style.width;
+    return formats;
+  }
+  format(name, value) {
+    if (name === 'width') {
+      this.domNode.style.width = value || '';
+    } else {
+      super.format(name, value);
+    }
+  }
+}
+ResizableImageBlot.blotName = 'image';
+Quill.register(ResizableImageBlot, true);
 
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
 
-const DEFAULT_EDGE_WEIGHT = 5;
 const SAVE_DELAY_MS = 500;
-const MS_PER_DAY = 86_400_000;
 const RELATION_LABEL_TEXT_MAX_LENGTH = 72;
-// Truncation length for relationship names shown on connector labels.
 const CONNECTOR_LABEL_MAX_LENGTH = 54;
 const ARIA_LABEL_DETAILS_MAX_LENGTH = 140;
 const CONNECTOR_CENTER_TARGET_RATIO = 0.42;
 const CONNECTOR_MIN_TARGET_OFFSET = 48;
-// Keep embedded data images below a conservative URL budget because each page
-// stores both Quill delta and preview HTML in localStorage.
-const MAX_DATA_IMAGE_URL_LENGTH = 1_500_000;
-const MAX_SANITIZED_HTML_CACHE_ENTRIES = 200;
-const UPLOAD_IMAGE_MAX_EDGE_LENGTH_ATTEMPTS = [1600, 1200, 900, 600];
-// canvas.toDataURL() quality values are 0–1 and only affect lossy formats.
-const UPLOAD_IMAGE_QUALITIES = [0.82, 0.7, 0.6];
-
-// Score = explicit weight (dominant) + visit popularity + recency decay.
-// This determines the ranking order of relation cards on each page.
-function pScore(edge, target) {
-  const weight = (edge.weight || DEFAULT_EDGE_WEIGHT) * 3;
-  const popularity = Math.log2((target.visits || 0) + 1) * 2;
-  const daysSinceUpdate = (Date.now() - (target.updatedAt || 0)) / MS_PER_DAY;
-  const recency = 8 * Math.exp(-daysSinceUpdate / 7);
-  return weight + popularity + recency;
-}
-
-function timeAgo(ts) {
-  if (!ts) return 'never';
-  const s = Math.floor((Date.now() - ts) / 1000);
-  if (s < 60)    return 'just now';
-  if (s < 3600)  return `${Math.floor(s / 60)}m ago`;
-  if (s < 86400) return `${Math.floor(s / 3600)}h ago`;
-  return `${Math.floor(s / 86400)}d ago`;
-}
 
 const stored = loadGraph();
 const nodes = ref(stored.nodes);
@@ -370,6 +447,7 @@ function persist() {
 const currentId = ref(null);
 const search = ref('');
 const listOpen = ref(false);
+const sidebarCollapsed = ref(false);
 const sidebarEl = ref(null);
 const mainScrollEl = ref(null);
 const relationshipCanvasEl = ref(null);
@@ -384,27 +462,12 @@ let saveTimer = null;
 let connectorFrame = null;
 let connectorResizeObserver = null;
 
-const RICH_CONTENT_TOOLBAR = [
-  ['bold', 'italic', 'underline', 'strike'],
-  [{ header: [1, 2, 3, false] }],
-  ['blockquote', 'code-block'],
-  [{ list: 'ordered' }, { list: 'bullet' }],
-  ['link', 'image'],
-  ['clean'],
-];
-
-const RICH_ALLOWED_TAGS = new Set([
-  'A', 'B', 'BLOCKQUOTE', 'BR', 'CODE', 'DIV', 'EM', 'H1', 'H2', 'H3', 'IMG',
-  'LI', 'OL', 'P', 'PRE', 'S', 'SPAN', 'STRONG', 'U', 'UL',
-]);
-const RICH_GLOBAL_ATTRS = new Set(['class']);
-const RICH_ALLOWED_ATTRS = {
-  A: new Set(['href', 'rel', 'target', 'title']),
-  IMG: new Set(['alt', 'src', 'title']),
-  LI: new Set(['data-list']),
-  SPAN: new Set(['contenteditable']),
-};
-const sanitizedHtmlCache = new Map();
+const imageResizeBar = reactive({
+  visible: false,
+  top: 0,
+  left: 0,
+  imageEl: null,
+});
 
 const modal = reactive({
   on: false,
@@ -460,291 +523,10 @@ const modalSaveLabel = computed(() =>
 );
 
 const modalDirectionLabel = computed(() => {
-  if (modal.dir === 'in') return 'Target → this page (incoming)';
+  if (modal.dir === 'in') return 'Target \u2192 this page (incoming)';
   if (modal.dir === 'bi') return 'Bidirectional';
-  return 'This page → target (outgoing)';
+  return 'This page \u2192 target (outgoing)';
 });
-
-function normalizeEditorHtml(html = '') {
-  return html === '<p><br></p>' ? '' : html;
-}
-
-function readFileAsDataUrl(file) {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(String(reader.result || ''));
-    reader.onerror = () => reject(reader.error);
-    reader.readAsDataURL(file);
-  });
-}
-
-function loadImage(src) {
-  return new Promise((resolve, reject) => {
-    const image = new Image();
-    image.onload = () => resolve(image);
-    image.onerror = reject;
-    image.src = src;
-  });
-}
-
-/**
- * Resizes an image so its longest edge fits maxEdgeLength and returns a data URL.
- */
-function imageToDataUrl(image, maxEdgeLength, type = 'image/jpeg', imageQuality) {
-  const scale = Math.min(1, maxEdgeLength / Math.max(1, image.naturalWidth, image.naturalHeight));
-  const canvas = document.createElement('canvas');
-  canvas.width = Math.max(1, Math.round(image.naturalWidth * scale));
-  canvas.height = Math.max(1, Math.round(image.naturalHeight * scale));
-
-  const ctx = canvas.getContext('2d');
-  if (!ctx) {
-    console.warn('Unable to resize image upload because this browser could not create a canvas context. The image will not be inserted; try another browser if this continues.');
-    return '';
-  }
-  if (type === 'image/jpeg') {
-    // JPEG has no transparency, so use white instead of the browser default black.
-    ctx.fillStyle = '#ffffff';
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
-  }
-  ctx.drawImage(image, 0, 0, canvas.width, canvas.height);
-  return type === 'image/jpeg'
-    ? canvas.toDataURL(type, imageQuality ?? UPLOAD_IMAGE_QUALITIES[0])
-    : canvas.toDataURL(type);
-}
-
-function isSafeRichUrl(value, allowDataImage = false) {
-  const trimmed = value.trim();
-  if (allowDataImage && /^data:image\/(png|jpe?g|gif|webp);base64,/i.test(trimmed)) {
-    if (trimmed.length > MAX_DATA_IMAGE_URL_LENGTH) return false;
-    const commaIndex = trimmed.indexOf(',');
-    const data = trimmed.slice(commaIndex + 1);
-    if (!data || data.length % 4 !== 0 || !/^[a-z0-9+/]+={0,2}$/i.test(data)) return false;
-    try {
-      atob(data);
-      return true;
-    } catch {
-      return false;
-    }
-  }
-
-  try {
-    const url = new URL(trimmed, window.location.origin);
-    return ['http:', 'https:', 'mailto:'].includes(url.protocol);
-  } catch {
-    return false;
-  }
-}
-
-/**
- * Tries progressively smaller image sizes/qualities until the data URL can be stored.
- */
-async function prepareImageUpload(file) {
-  const original = await readFileAsDataUrl(file);
-  if (isSafeRichUrl(original, true)) return original;
-
-  const image = await loadImage(original);
-  for (const maxEdgeLength of UPLOAD_IMAGE_MAX_EDGE_LENGTH_ATTEMPTS) {
-    if (file.type === 'image/png') {
-      // PNG is lossless, so retrying at smaller dimensions is the only size lever.
-      const png = imageToDataUrl(image, maxEdgeLength, 'image/png');
-      if (isSafeRichUrl(png, true)) return png;
-    }
-
-    // If a PNG is still too large, fall back to JPEG so the image can persist.
-    for (const imageQuality of UPLOAD_IMAGE_QUALITIES) {
-      const jpeg = imageToDataUrl(image, maxEdgeLength, 'image/jpeg', imageQuality);
-      if (isSafeRichUrl(jpeg, true)) return jpeg;
-    }
-  }
-
-  return '';
-}
-
-async function handleImageUpload(quill, range, files) {
-  const fileCount = files.length;
-  const images = (await Promise.all(
-    Array.from(files, file => prepareImageUpload(file).catch(error => {
-      console.warn(`Unable to prepare image upload for ${file.name || file.type || 'selected file'}.`, error);
-      return '';
-    }))
-  )).filter(Boolean);
-
-  if (!images.length) {
-    alert('Unable to add that image. Try a smaller image or a different image format.');
-    return;
-  }
-  if (images.length < fileCount) {
-    alert('Some images could not be added. Try smaller images or a different image format.');
-  }
-
-  quill.deleteText(range.index, range.length, 'user');
-  let insertAt = range.index;
-  for (const imageDataUrl of images) {
-    quill.insertEmbed(insertAt, 'image', imageDataUrl, 'user');
-    insertAt++;
-  }
-  quill.setSelection(insertAt, 0, 'silent');
-}
-
-/**
- * Quill uploader handler; Quill provides the uploader module as `this`.
- */
-function imageUploadHandler(range, files) {
-  // Quill calls uploader handlers with the uploader module as `this`.
-  if (!this?.quill) return Promise.resolve();
-  return handleImageUpload(this.quill, range, files);
-}
-
-function sanitizeRichHtml(html = '') {
-  if (sanitizedHtmlCache.has(html)) {
-    const cached = sanitizedHtmlCache.get(html);
-    sanitizedHtmlCache.delete(html);
-    sanitizedHtmlCache.set(html, cached);
-    return cached;
-  }
-
-  const template = document.createElement('template');
-  template.innerHTML = html;
-
-  function cleanNode(node) {
-    if (node.nodeType !== Node.ELEMENT_NODE) return;
-
-    const element = node;
-    if (['SCRIPT', 'STYLE'].includes(element.tagName)) {
-      element.remove();
-      return;
-    }
-
-    if (!RICH_ALLOWED_TAGS.has(element.tagName)) {
-      element.replaceWith(...element.childNodes);
-      return;
-    }
-
-    for (const attr of [...element.attributes]) {
-      const allowedForTag = RICH_ALLOWED_ATTRS[element.tagName] ?? new Set();
-      const isAllowed = RICH_GLOBAL_ATTRS.has(attr.name) || allowedForTag.has(attr.name);
-      if (!isAllowed || /^on/i.test(attr.name)) {
-        element.removeAttribute(attr.name);
-      }
-    }
-
-    if (element.tagName === 'A') {
-      const href = element.getAttribute('href');
-      if (!href || !isSafeRichUrl(href)) {
-        element.removeAttribute('href');
-      } else {
-        element.setAttribute('rel', 'noopener noreferrer');
-        element.setAttribute('target', '_blank');
-      }
-    }
-
-    if (element.tagName === 'IMG') {
-      const src = element.getAttribute('src');
-      if (!src || !isSafeRichUrl(src, true)) {
-        element.remove();
-        return;
-      }
-    }
-  }
-
-  let current;
-  const walker = document.createTreeWalker(template.content, NodeFilter.SHOW_ELEMENT);
-  while ((current = walker.nextNode())) {
-    cleanNode(current);
-  }
-
-  const sanitized = template.innerHTML;
-  if (sanitizedHtmlCache.size >= MAX_SANITIZED_HTML_CACHE_ENTRIES) {
-    sanitizedHtmlCache.delete(sanitizedHtmlCache.keys().next().value);
-  }
-  sanitizedHtmlCache.set(html, sanitized);
-  return sanitized;
-}
-
-/**
- * Returns a storage-safe Quill delta with unsafe image embeds and links removed.
- * Malformed deltas and operations are omitted so persistence can continue.
- */
-function sanitizeRichDelta(delta) {
-  const ops = Array.isArray(delta?.ops) ? delta.ops : [];
-  return {
-    ops: ops
-      .filter(op => {
-        if (!op || typeof op !== 'object') return false;
-        const image = typeof op.insert === 'object' ? op.insert?.image : null;
-        return !image || isSafeRichUrl(String(image), true);
-      })
-      .map(op => {
-        const cleaned = { ...op };
-        if (op.insert && typeof op.insert === 'object') {
-          cleaned.insert = { ...op.insert };
-        }
-        if (op.attributes && typeof op.attributes === 'object') {
-          cleaned.attributes = { ...op.attributes };
-        }
-
-        const link = cleaned.attributes?.link;
-        if (!link || isSafeRichUrl(String(link))) return cleaned;
-
-        delete cleaned.attributes.link;
-        if (!Object.keys(cleaned.attributes).length) {
-          delete cleaned.attributes;
-        }
-        return cleaned;
-      }),
-  };
-}
-
-function normalizeNewlines(text = '') {
-  return text.replace(/\r\n/g, '\n');
-}
-
-function firstNormalizedLine(text = '') {
-  return normalizeNewlines(text).split('\n')[0].trim();
-}
-
-function splitRelationDescription(desc = '') {
-  const [label = '', ...detailLines] = normalizeNewlines(desc).split('\n');
-  return {
-    label: label.trim(),
-    detail: detailLines.join('\n').replace(/\s+$/, ''),
-  };
-}
-
-function richTextToPlainText(html = '') {
-  const template = document.createElement('template');
-  template.innerHTML = html;
-  return (template.content.textContent || '').replace(/\s+/g, ' ').trim();
-}
-
-function richTextFirstLine(html = '') {
-  const doc = new DOMParser().parseFromString(html, 'text/html');
-  const blocks = doc.body.querySelectorAll('p, h1, h2, h3, li, blockquote, pre');
-  for (const block of blocks) {
-    const text = (block.textContent || '').replace(/\s+/g, ' ').trim();
-    if (text) return text;
-  }
-  return firstNormalizedLine(doc.body.textContent || '');
-}
-
-function decodeHtmlEntities(text = '') {
-  const textarea = document.createElement('textarea');
-  textarea.innerHTML = text;
-  return textarea.value;
-}
-
-function escapeHtml(text = '') {
-  return text
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#039;');
-}
-
-function truncateText(text = '', maxLength) {
-  return text.length > maxLength ? `${text.slice(0, maxLength - 1).trimEnd()}…` : text;
-}
 
 function extractRelationLabel(relationHtml, desc = '') {
   const plainText = relationHtml ? richTextFirstLine(relationHtml) : firstNormalizedLine(desc);
@@ -804,11 +586,11 @@ const rankedRelations = computed(() => {
     let side = '';
     if (e.fromId === cid) {
       tid = e.toId;
-      dir = '→ outgoing';
+      dir = '\u2192 outgoing';
       side = 'outgoing';
     } else if (e.toId === cid) {
       tid = e.fromId;
-      dir = '← incoming';
+      dir = '\u2190 incoming';
       side = 'incoming';
     }
     if (!tid) continue;
@@ -834,7 +616,7 @@ const rankedRelations = computed(() => {
       relationLabel: extractRelationLabel(relationHtml, e.desc),
       pageDetails: extractPageDetailsFromHtml(pageHtml),
       pageDetailsHtml: pageHtml,
-      pageMeta: `Edited ${timeAgo(t.updatedAt)} · ${(t.visits || 0)} visit${t.visits !== 1 ? 's' : ''}`,
+      pageMeta: `Edited ${timeAgo(t.updatedAt)} \u00b7 ${(t.visits || 0)} visit${t.visits !== 1 ? 's' : ''}`,
       score: pScore(e, t),
     };
     relation.ariaLabel = relationAriaLabel(relation);
@@ -851,20 +633,88 @@ const outgoingRanked = computed(() =>
   rankedRelations.value.filter(r => r.side === 'outgoing')
 );
 
+const hop2Incoming = computed(() => {
+  if (!currentId.value) return [];
+  const alreadyShown = new Set([
+    currentId.value,
+    ...incomingRanked.value.map(r => r.targetId),
+    ...outgoingRanked.value.map(r => r.targetId),
+  ]);
+
+  const results = [];
+  for (const r of incomingRanked.value) {
+    for (const edge of edges.value) {
+      if (edge.toId === r.targetId && !alreadyShown.has(edge.fromId)) {
+        const node = findNode(edge.fromId);
+        if (!node) continue;
+        alreadyShown.add(node.id);
+        const score = pScore(edge, node);
+        const pageHtml = pageDetailsHtml(node);
+        results.push({
+          edgeId: `hop2-${edge.id}`,
+          targetId: node.id,
+          parentEdgeId: r.edgeId,
+          title: node.title || '(untitled)',
+          score,
+          pageDetails: extractPageDetailsFromHtml(pageHtml),
+          pageDetailsHtml: pageHtml,
+          pageMeta: `Edited ${timeAgo(node.updatedAt)} \u00b7 ${node.visits || 0} visit${node.visits !== 1 ? 's' : ''}`,
+          dir: '\u2190 2-hop',
+        });
+      }
+    }
+  }
+  return results.sort((a, b) => b.score - a.score).slice(0, 8);
+});
+
+const hop2Outgoing = computed(() => {
+  if (!currentId.value) return [];
+  const alreadyShown = new Set([
+    currentId.value,
+    ...incomingRanked.value.map(r => r.targetId),
+    ...outgoingRanked.value.map(r => r.targetId),
+  ]);
+
+  const results = [];
+  for (const r of outgoingRanked.value) {
+    for (const edge of edges.value) {
+      if (edge.fromId === r.targetId && !alreadyShown.has(edge.toId)) {
+        const node = findNode(edge.toId);
+        if (!node) continue;
+        alreadyShown.add(node.id);
+        const score = pScore(edge, node);
+        const pageHtml = pageDetailsHtml(node);
+        results.push({
+          edgeId: `hop2-${edge.id}`,
+          targetId: node.id,
+          parentEdgeId: r.edgeId,
+          title: node.title || '(untitled)',
+          score,
+          pageDetails: extractPageDetailsFromHtml(pageHtml),
+          pageDetailsHtml: pageHtml,
+          pageMeta: `Edited ${timeAgo(node.updatedAt)} \u00b7 ${node.visits || 0} visit${node.visits !== 1 ? 's' : ''}`,
+          dir: '\u2192 2-hop',
+        });
+      }
+    }
+  }
+  return results.sort((a, b) => b.score - a.score).slice(0, 8);
+});
+
 function setRelationCardRef(edgeId, el) {
   if (el) {
     relationCardEls.set(edgeId, el);
+    connectorResizeObserver?.observe(el);
   } else {
+    const prev = relationCardEls.get(edgeId);
+    if (prev) connectorResizeObserver?.unobserve(prev);
     relationCardEls.delete(edgeId);
   }
 }
 
-function connectorPath(startX, startY, endX, endY, relationSide) {
+function connectorPath(startX, startY, endX, endY, _relationSide) {
   const curve = Math.min(120, Math.max(48, Math.abs(endX - startX) * 0.45));
-  if (relationSide === 'incoming') {
-    return `M ${startX} ${startY} C ${startX + curve} ${startY}, ${endX - curve} ${endY}, ${endX} ${endY}`;
-  }
-  return `M ${startX} ${startY} C ${startX - curve} ${startY}, ${endX + curve} ${endY}, ${endX} ${endY}`;
+  return `M ${startX} ${startY} C ${startX + curve} ${startY}, ${endX - curve} ${endY}, ${endX} ${endY}`;
 }
 
 function connectorCenterVerticalOffset(centerHeight, cardMidpointY, centerTop) {
@@ -939,17 +789,51 @@ function removeConnectorScrollListener() {
   mainScrollEl.value?.removeEventListener('scroll', scheduleConnectorUpdate);
 }
 
+// ── Image resize ──────────────────────────────────────────────────────
+function attachImageClickHandlers() {
+  if (!editor) return;
+  editor.root.addEventListener('click', (e) => {
+    if (e.target.tagName === 'IMG') {
+      showImageResizeBar(e.target);
+    } else {
+      hideImageResizeBar();
+    }
+  });
+}
+
+function showImageResizeBar(imgEl) {
+  const editorRect = editor.root.getBoundingClientRect();
+  const imgRect = imgEl.getBoundingClientRect();
+  imageResizeBar.imageEl = imgEl;
+  imageResizeBar.top = imgRect.bottom - editorRect.top + editor.root.scrollTop + 4;
+  imageResizeBar.left = imgRect.left - editorRect.left;
+  imageResizeBar.visible = true;
+}
+
+function hideImageResizeBar() {
+  imageResizeBar.visible = false;
+  imageResizeBar.imageEl = null;
+}
+
+function resizeSelectedImage(widthPct) {
+  if (!imageResizeBar.imageEl || !editor) return;
+  const blot = Quill.find(imageResizeBar.imageEl);
+  if (blot) {
+    editor.formatText(editor.getIndex(blot), 1, 'width', widthPct === 100 ? false : `${widthPct}%`, 'user');
+  }
+  hideImageResizeBar();
+  queueSave();
+}
+
 // ── Quill ─────────────────────────────────────────────────────────────
 function initEditor() {
-  // Quill injects its toolbar as a sibling inside .editor-wrap, not inside
-  // #qeditor itself. Clearing only #qeditor leaves orphaned toolbars behind.
-  // Rebuild the whole wrapper so every init starts from a clean slate.
+  hideImageResizeBar();
   const wrap = document.querySelector('.editor-wrap');
   if (!wrap) return;
   wrap.innerHTML = '<div id="qeditor"></div>';
   editor = new Quill('#qeditor', {
     theme: 'snow',
-    placeholder: 'Write something about this page…',
+    placeholder: 'Write something about this page\u2026',
     modules: {
       toolbar: RICH_CONTENT_TOOLBAR,
       uploader: {
@@ -964,6 +848,7 @@ function initEditor() {
     }
   }
   editor.on('text-change', queueSave);
+  attachImageClickHandlers();
 }
 
 function restoreEditorContents(quill, serializedDelta) {
@@ -1019,12 +904,32 @@ function flush() {
   persist();
 }
 
+// ── Hash routing ──────────────────────────────────────────────────────
+function parseNodeIdFromHash() {
+  return window.location.hash.slice(1) || null;
+}
+
+function pushNodeToHash(id) {
+  const currentHash = parseNodeIdFromHash();
+  if (currentHash !== id) {
+    history.pushState(null, '', `#${id}`);
+  }
+}
+
+function onHashChange() {
+  const id = parseNodeIdFromHash();
+  if (id && id !== currentId.value && findNode(id)) {
+    loadNode(id);
+  }
+}
+
 // ── Node CRUD ─────────────────────────────────────────────────────────
 async function loadNode(id) {
   flush();
   const node = findNode(id);
   if (node) node.visits = (node.visits || 0) + 1;
   currentId.value = id;
+  pushNodeToHash(id);
   await nextTick();
   initEditor();
   observeConnectorTargets();
@@ -1197,10 +1102,25 @@ function toggleRelationPopover(edgeId) {
   relPopover.pinned = true;
 }
 
-function handleRelationCardClick(_evt, relation) {
+function handleRelationCardClick(evt, relation) {
   relPopover.edgeId = '';
   relPopover.pinned = false;
-  loadNode(relation.targetId);
+
+  if (!document.startViewTransition) {
+    loadNode(relation.targetId);
+    return;
+  }
+
+  const cardEl = evt.currentTarget;
+  cardEl.style.viewTransitionName = 'page-center';
+  if (centerPanelEl.value) centerPanelEl.value.style.viewTransitionName = '';
+
+  document.startViewTransition(async () => {
+    cardEl.style.viewTransitionName = '';
+    await loadNode(relation.targetId);
+    await nextTick();
+    if (centerPanelEl.value) centerPanelEl.value.style.viewTransitionName = 'page-center';
+  });
 }
 
 // ── Export ────────────────────────────────────────────────────────────
@@ -1208,16 +1128,10 @@ function triggerImportData() {
   importFileInputEl.value?.click();
 }
 
-/**
- * Returns value when it is a finite number, otherwise returns fallback.
- */
 function finiteNumberOr(value, fallback) {
   return Number.isFinite(value) ? value : fallback;
 }
 
-/**
- * Returns value when it is a string, otherwise returns fallback.
- */
 function stringOr(value, fallback = '') {
   return typeof value === 'string' ? value : fallback;
 }
@@ -1358,8 +1272,12 @@ onMounted(async () => {
   connectorResizeObserver = new ResizeObserver(scheduleConnectorUpdate);
   observeConnectorTargets();
   addConnectorScrollListener();
+  window.addEventListener('hashchange', onHashChange);
 
-  if (nodes.value.length) {
+  const idFromHash = parseNodeIdFromHash();
+  if (idFromHash && findNode(idFromHash)) {
+    await loadNode(idFromHash);
+  } else if (nodes.value.length) {
     await loadLatestNode();
   }
   scheduleConnectorUpdate();
@@ -1367,6 +1285,7 @@ onMounted(async () => {
 
 onBeforeUnmount(() => {
   window.removeEventListener('resize', scheduleConnectorUpdate);
+  window.removeEventListener('hashchange', onHashChange);
   removeConnectorScrollListener();
   connectorResizeObserver?.disconnect();
   if (connectorFrame) cancelAnimationFrame(connectorFrame);
