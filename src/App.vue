@@ -474,6 +474,8 @@ const CARD_SCORE_LOW = 12;
 const CARD_SCORE_HIGH = 30;
 const MAX_HOP_INDENT_LEVEL = 5;
 const HOP_INDENT_PX = 8;
+const CENTER_TRANSITION_NAME = 'page-center';
+const CARD_TRANSITION_NAME = 'page-card';
 
 const stored = loadGraph();
 const nodes = ref(stored.nodes);
@@ -790,7 +792,7 @@ function discoverRemoteRelations(side, directRelations) {
 
   return [...visibleByNodeId.values()]
     // Equal scores favor closer pages because their relationship chain is easier to scan.
-    .sort((a, b) => b.score - a.score || a.hop - b.hop) // Lower hop count wins ties.
+    .sort((a, b) => b.score - a.score || a.hop - b.hop)
     .slice(0, REMOTE_MAX_CARDS_PER_SIDE)
     .map(relation => ({
       ...relation,
@@ -1107,10 +1109,10 @@ async function navigateToNode(id, sourceEl = null) {
   const oldCenterTransitionName = oldCenter?.style.viewTransitionName ?? '';
   let oldPageCardTransitionName = '';
   if (sourceEl) {
-    sourceEl.style.viewTransitionName = 'page-center';
-    if (oldCenter) oldCenter.style.viewTransitionName = 'page-card';
+    sourceEl.style.viewTransitionName = CENTER_TRANSITION_NAME;
+    if (oldCenter) oldCenter.style.viewTransitionName = CARD_TRANSITION_NAME;
   } else if (oldCenter) {
-    oldCenter.style.viewTransitionName = 'page-center';
+    oldCenter.style.viewTransitionName = CENTER_TRANSITION_NAME;
   }
 
   let oldPageCard = null;
@@ -1118,12 +1120,12 @@ async function navigateToNode(id, sourceEl = null) {
     if (sourceEl) sourceEl.style.viewTransitionName = 'none';
     await loadNode(id);
     await nextTick();
-    if (centerPanelEl.value) centerPanelEl.value.style.viewTransitionName = 'page-center';
+    if (centerPanelEl.value) centerPanelEl.value.style.viewTransitionName = CENTER_TRANSITION_NAME;
     if (sourceEl && previousId) {
       oldPageCard = relationCardForTarget(previousId);
       if (oldPageCard) {
         oldPageCardTransitionName = oldPageCard.style.viewTransitionName;
-        oldPageCard.style.viewTransitionName = 'page-card';
+        oldPageCard.style.viewTransitionName = CARD_TRANSITION_NAME;
       }
     }
   });
