@@ -22,7 +22,7 @@ export const RICH_ALLOWED_ATTRS = {
 };
 
 export const MAX_SANITIZED_HTML_CACHE_ENTRIES = 200;
-const MAX_IMAGE_WIDTH_PX = 2_000;
+const MAX_IMAGE_WIDTH_PIXELS = 2_000;
 
 export function sanitizeImageWidth(value) {
   const trimmed = String(value || '').trim();
@@ -33,7 +33,7 @@ export function sanitizeImageWidth(value) {
   const unit = match[2].toLowerCase();
   if (!Number.isFinite(size) || size <= 0) return '';
   if (unit === '%' && size > 100) return '';
-  if (unit === 'px' && size > MAX_IMAGE_WIDTH_PX) return '';
+  if (unit === 'px' && size > MAX_IMAGE_WIDTH_PIXELS) return '';
   return `${size}${unit}`;
 }
 
