@@ -27,6 +27,16 @@ body {
   overflow: hidden;
 }
 
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
 /* ── Layout ────────────────────────────────────── */
 .layout { display: flex; height: 100vh; overflow: hidden; }
 
@@ -390,6 +400,17 @@ body {
   white-space: normal;
 }
 
+.rel-page-preview {
+  color: var(--muted);
+}
+
+.rel-page-preview p { margin: 0 0 4px; }
+.rel-page-preview p:last-child { margin-bottom: 0; }
+.rel-page-preview img {
+  max-height: 70px;
+  object-fit: contain;
+}
+
 .rel-detail {
   font-size: 12px;
   color: var(--muted);
@@ -520,6 +541,11 @@ body {
 .rel-connector-hotspot {
   position: absolute;
   pointer-events: auto;
+  z-index: 1;
+}
+
+.rel-connector-hotspot.active {
+  z-index: 20;
 }
 
 .rel-connector-label {
@@ -554,6 +580,7 @@ body {
 
 .rel-popover {
   position: absolute;
+  z-index: 30;
   left: 0;
   top: 18px;
   width: 320px;
