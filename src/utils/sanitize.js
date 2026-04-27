@@ -77,6 +77,8 @@ export function sanitizeRichHtml(html = '') {
     if (node.nodeType !== Node.ELEMENT_NODE) return;
 
     const element = node;
+    // Child cleanup can remove or lift nodes, so snapshot the live collection
+    // before mutating the subtree.
     for (const child of [...element.children]) {
       cleanNode(child);
     }

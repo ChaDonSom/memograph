@@ -657,18 +657,20 @@ const connectorLabelLines = computed(() =>
   connectorLines.value.filter(line => !line.isHop2)
 );
 
-function groupEdgesBy(key) {
-  const groups = new Map();
-  for (const edge of edges.value) {
-    const id = edge[key];
-    if (!groups.has(id)) groups.set(id, []);
-    groups.get(id).push(edge);
-  }
-  return groups;
+function addEdgeToLookup(lookup, nodeId, edge) {
+  if (!lookup.has(nodeId)) lookup.set(nodeId, []);
+  lookup.get(nodeId).push(edge);
 }
 
-const edgesByFromId = computed(() => groupEdgesBy('fromId'));
-const edgesByToId = computed(() => groupEdgesBy('toId'));
+const edgeLookups = computed(() => {
+  const byFromId = new Map();
+  const byToId = new Map();
+  for (const edge of edges.value) {
+    addEdgeToLookup(byFromId, edge.fromId, edge);
+    addEdgeToLookup(byToId, edge.toId, edge);
+  }
+  return { byFromId, byToId };
+});
 
 const hop2Incoming = computed(() => {
   if (!currentId.value) return [];
@@ -680,7 +682,7 @@ const hop2Incoming = computed(() => {
 
   const results = [];
   for (const r of incomingRanked.value) {
-    for (const edge of edgesByToId.value.get(r.targetId) || []) {
+    for (const edge of edgeLookups.value.byToId.get(r.targetId) || []) {
       if (edge.toId === r.targetId && !alreadyShown.has(edge.fromId)) {
         const node = findNode(edge.fromId);
         if (!node) continue;
@@ -717,7 +719,7 @@ const hop2Outgoing = computed(() => {
 
   const results = [];
   for (const r of outgoingRanked.value) {
-    for (const edge of edgesByFromId.value.get(r.targetId) || []) {
+    for (const edge of edgeLookups.value.byFromId.get(r.targetId) || []) {
       if (edge.fromId === r.targetId && !alreadyShown.has(edge.toId)) {
         const node = findNode(edge.toId);
         if (!node) continue;
@@ -915,6 +917,8 @@ function initEditor() {
     quillHost.setAttribute('data-quill-host', 'true');
     wrap.insertBefore(quillHost, wrap.firstChild);
   }
+  // Only the Quill-owned host is rebuilt; Vue still owns the surrounding
+  // wrapper and image resize toolbar.
   quillHost.innerHTML = '<div id="qeditor"></div>';
   editor = new Quill('#qeditor', {
     theme: 'snow',
