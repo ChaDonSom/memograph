@@ -81,7 +81,9 @@
             v-for="line in connectorLines"
             :key="line.edgeId"
             class="rel-connector"
-            :class="{ 'rel-connector--hop2': line.isHop2 }"
+            :class="{ 'rel-connector--remote': line.isRemote, 'rel-connector--active': isConnectorHighlighted(line) }"
+            @mouseenter="activateRelationLine(line)"
+            @mouseleave="clearRelationHighlight"
           >
             <path :d="line.path" marker-end="url(#rel-arrowhead)" />
           </g>
@@ -91,12 +93,12 @@
             v-for="line in connectorLabelLines"
             :key="line.edgeId"
             class="rel-connector-hotspot"
-            :class="{ active: relPopover.edgeId === line.edgeId }"
+            :class="{ active: relPopover.edgeId === line.edgeId, 'rel-connector-hotspot--active': isConnectorHighlighted(line) }"
             :style="{ left: line.labelX + 'px', top: line.labelY + 'px' }"
-            @mouseenter="showRelationPopover(line.edgeId)"
-            @mouseleave="hideRelationPopover"
-            @focusin="showRelationPopover(line.edgeId)"
-            @focusout="hideRelationPopover"
+            @mouseenter="handleConnectorLabelEnter(line)"
+            @mouseleave="handleConnectorLabelLeave"
+            @focusin="handleConnectorLabelEnter(line)"
+            @focusout="handleConnectorLabelLeave"
           >
             <button
               type="button"
@@ -114,7 +116,7 @@
               <div class="rel-popover-body" v-html="line.relation.relationBodyHtml"></div>
               <div class="rel-popover-actions">
                 <button class="btn btn-ghost" @click="openEditRelationModal(line.relation)">Edit relation</button>
-                <button class="btn btn-danger" @click="dropEdge(line.edgeId)">Delete relation</button>
+                <button class="btn btn-danger" @click="dropRelationEdge(line.relation)">Delete relation</button>
               </div>
             </div>
           </div>
@@ -123,7 +125,11 @@
         <section class="relation-side relation-side--incoming" aria-label="Incoming relationships">
           <div class="relation-side-head">
             <span class="rel-label">Incoming</span>
-            <span class="rel-count">{{ incomingRanked.length }}</span>
+            <span
+              class="rel-count"
+              title="Direct / visible total"
+              :aria-label="relationCountLabel('incoming', incomingRanked.length, remoteIncoming.length)"
+            >{{ incomingRanked.length }} / {{ incomingRanked.length + remoteIncoming.length }}</span>
           </div>
           <div class="rel-column" v-if="incomingRanked.length">
             <div
@@ -131,9 +137,15 @@
               :key="r.edgeId"
               :ref="el => setRelationCardRef(r.edgeId, el)"
               class="rel-card rel-card--side"
+              :class="[relationCardSizeClass(r), { 'rel-card--connected-active': isRelationCardHighlighted(r) }]"
+              :style="relationCardStyle(r)"
               role="button"
               tabindex="0"
               :aria-label="r.ariaLabel"
+              @mouseenter="activateRelationNode(r.targetId)"
+              @mouseleave="clearRelationHighlight"
+              @focusin="activateRelationNode(r.targetId)"
+              @focusout="clearRelationHighlight"
               @click="handleRelationCardClick($event, r)"
               @keydown.enter.self.prevent="navigateToNode(r.targetId)"
               @keydown.space.self.prevent="navigateToNode(r.targetId)"
@@ -157,17 +169,22 @@
             </div>
           </div>
           <div class="rel-empty" v-else>No incoming relations.</div>
-          <!-- 2-hop incoming neighbours (half-size) -->
-          <div v-if="hop2Incoming.length" class="rel-column rel-column--hop2">
-            <div class="rel-hop-label">2nd-hop incoming</div>
+          <div v-if="remoteIncoming.length" class="rel-column rel-column--remote">
+            <div class="rel-hop-label">Further incoming</div>
             <div
-              v-for="r in hop2Incoming"
+              v-for="r in remoteIncoming"
               :key="r.edgeId"
               :ref="el => setRelationCardRef(r.edgeId, el)"
-              class="rel-card rel-card--side rel-card--hop2"
+              class="rel-card rel-card--side rel-card--remote"
+              :class="[relationCardSizeClass(r), { 'rel-card--connected-active': isRelationCardHighlighted(r) }]"
+              :style="relationCardStyle(r)"
               role="button"
               tabindex="0"
               :aria-label="r.ariaLabel"
+              @mouseenter="activateRelationNode(r.targetId)"
+              @mouseleave="clearRelationHighlight"
+              @focusin="activateRelationNode(r.targetId)"
+              @focusout="clearRelationHighlight"
               @click="handleRelationCardClick($event, r)"
               @keydown.enter.self.prevent="navigateToNode(r.targetId)"
               @keydown.space.self.prevent="navigateToNode(r.targetId)"
@@ -188,7 +205,16 @@
           </div>
         </section>
 
-        <section class="resource-panel" ref="centerPanelEl" aria-label="Current page">
+        <section
+          class="resource-panel"
+          :class="{ 'rel-panel--connected-active': isNodeHighlighted(currentId) }"
+          ref="centerPanelEl"
+          aria-label="Current page"
+          @mouseenter="activateRelationNode(currentId)"
+          @mouseleave="clearRelationHighlight"
+          @focusin="activateRelationNode(currentId)"
+          @focusout="clearRelationHighlight"
+        >
           <!-- Title -->
           <div>
             <input
@@ -242,7 +268,11 @@
         <section class="relation-side relation-side--outgoing" aria-label="Outgoing relationships">
           <div class="relation-side-head">
             <span class="rel-label">Outgoing</span>
-            <span class="rel-count">{{ outgoingRanked.length }}</span>
+            <span
+              class="rel-count"
+              title="Direct / visible total"
+              :aria-label="relationCountLabel('outgoing', outgoingRanked.length, remoteOutgoing.length)"
+            >{{ outgoingRanked.length }} / {{ outgoingRanked.length + remoteOutgoing.length }}</span>
           </div>
           <div class="rel-column" v-if="outgoingRanked.length">
             <div
@@ -250,9 +280,15 @@
               :key="r.edgeId"
               :ref="el => setRelationCardRef(r.edgeId, el)"
               class="rel-card rel-card--side"
+              :class="[relationCardSizeClass(r), { 'rel-card--connected-active': isRelationCardHighlighted(r) }]"
+              :style="relationCardStyle(r)"
               role="button"
               tabindex="0"
               :aria-label="r.ariaLabel"
+              @mouseenter="activateRelationNode(r.targetId)"
+              @mouseleave="clearRelationHighlight"
+              @focusin="activateRelationNode(r.targetId)"
+              @focusout="clearRelationHighlight"
               @click="handleRelationCardClick($event, r)"
               @keydown.enter.self.prevent="navigateToNode(r.targetId)"
               @keydown.space.self.prevent="navigateToNode(r.targetId)"
@@ -276,17 +312,22 @@
             </div>
           </div>
           <div class="rel-empty" v-else>No outgoing relations.</div>
-          <!-- 2-hop outgoing neighbours (half-size) -->
-          <div v-if="hop2Outgoing.length" class="rel-column rel-column--hop2">
-            <div class="rel-hop-label">2nd-hop outgoing</div>
+          <div v-if="remoteOutgoing.length" class="rel-column rel-column--remote">
+            <div class="rel-hop-label">Further outgoing</div>
             <div
-              v-for="r in hop2Outgoing"
+              v-for="r in remoteOutgoing"
               :key="r.edgeId"
               :ref="el => setRelationCardRef(r.edgeId, el)"
-              class="rel-card rel-card--side rel-card--hop2"
+              class="rel-card rel-card--side rel-card--remote"
+              :class="[relationCardSizeClass(r), { 'rel-card--connected-active': isRelationCardHighlighted(r) }]"
+              :style="relationCardStyle(r)"
               role="button"
               tabindex="0"
               :aria-label="r.ariaLabel"
+              @mouseenter="activateRelationNode(r.targetId)"
+              @mouseleave="clearRelationHighlight"
+              @focusin="activateRelationNode(r.targetId)"
+              @focusout="clearRelationHighlight"
               @click="handleRelationCardClick($event, r)"
               @keydown.enter.self.prevent="navigateToNode(r.targetId)"
               @keydown.space.self.prevent="navigateToNode(r.targetId)"
@@ -444,13 +485,32 @@ const SAVE_DELAY_MS = 500;
 const RELATION_LABEL_TEXT_MAX_LENGTH = 72;
 const CONNECTOR_LABEL_MAX_LENGTH = 54;
 const ARIA_LABEL_DETAILS_MAX_LENGTH = 140;
-const CONNECTOR_CENTER_TARGET_RATIO = 0.42;
-const CONNECTOR_MIN_TARGET_OFFSET = 48;
 const CONNECTOR_VERTICAL_THRESHOLD = 24;
 const CONNECTOR_MAX_CURVE = 120;
 const CONNECTOR_MIN_CURVE = 48;
 const CONNECTOR_VERTICAL_CURVE_RATIO = 0.35;
 const CONNECTOR_HORIZONTAL_CURVE_RATIO = 0.45;
+const CONNECTOR_ENDPOINT_GAP = 38;
+const CONNECTOR_ENDPOINT_EDGE_PADDING = 18;
+// Each additional hop multiplies the P score by 0.62, favoring close pages while allowing strong distant pages through.
+const REMOTE_HOP_MULTIPLIER = 0.62;
+const REMOTE_MIN_SCORE = 4;
+const REMOTE_MAX_CARDS_PER_SIDE = 36;
+// Card sizing treats low P scores as compact and high P scores as prominent.
+const CARD_SCORE_LOW = 12;
+const CARD_SCORE_HIGH = 30;
+const MAX_HOP_INDENT_LEVEL = 5;
+const HOP_INDENT_PX = 8;
+const CENTER_TRANSITION_NAME = 'page-center';
+const CARD_TRANSITION_NAME = 'page-card';
+const RELATION_CARD_TRANSITION_PREFIX = 'rel-card-';
+const ARROW_SEPARATOR = '\u2192';
+const REMOTE_CONNECTOR_LABEL_X_OFFSET = 8;
+const REMOTE_CONNECTOR_MIN_ARC = 46;
+const REMOTE_CONNECTOR_LANE_GAP = 9;
+const REMOTE_CONNECTOR_MAX_LANES = 5;
+const REMOTE_CONNECTOR_LANE_CENTER_OFFSET = 2;
+const REMOTE_CONNECTOR_LABEL_Y_OFFSET = -8;
 
 const stored = loadGraph();
 const nodes = ref(stored.nodes);
@@ -481,6 +541,9 @@ let relEditor = null;
 let saveTimer = null;
 let connectorFrame = null;
 let connectorResizeObserver = null;
+const activeRelationEdgeId = ref('');
+const activeRelationNodeId = ref('');
+const activeRelationNodeIdSet = ref(new Set());
 
 const imageResizeBar = reactive({
   visible: false,
@@ -500,6 +563,8 @@ const modal = reactive({
   w: DEFAULT_EDGE_WEIGHT,
   desc: '',
   descDelta: '',
+  editFromId: '',
+  editToId: '',
 });
 const relPopover = reactive({ edgeId: '', pinned: false });
 
@@ -543,9 +608,14 @@ const modalSaveLabel = computed(() =>
 );
 
 const modalDirectionLabel = computed(() => {
-  if (modal.dir === 'in') return 'Target \u2192 this page (incoming)';
+  if (modal.mode === 'edit' && modal.editFromId && modal.editToId) {
+    const from = findNode(modal.editFromId);
+    const to = findNode(modal.editToId);
+    if (from && to) return `${from.title || '(untitled)'} ${ARROW_SEPARATOR} ${to.title || '(untitled)'}`;
+  }
+  if (modal.dir === 'in') return `Target ${ARROW_SEPARATOR} this page (incoming)`;
   if (modal.dir === 'bi') return 'Bidirectional';
-  return 'This page \u2192 target (outgoing)';
+  return `This page ${ARROW_SEPARATOR} target (outgoing)`;
 });
 
 function extractRelationLabel(relationHtml, desc = '') {
@@ -586,6 +656,53 @@ async function loadLatestNode() {
 function relationAriaLabel(relation) {
   const details = truncateText(decodeHtmlEntities(relation.pageDetails), ARIA_LABEL_DETAILS_MAX_LENGTH);
   return `${relation.dir} ${relation.title}. ${details}. Press Enter or Space to open related page.`;
+}
+
+function clamp(value, min, max) {
+  return Math.min(max, Math.max(min, value));
+}
+
+function importanceRatio(score) {
+  return clamp((score - CARD_SCORE_LOW) / (CARD_SCORE_HIGH - CARD_SCORE_LOW), 0, 1);
+}
+
+function relationCardSizeClass(relation) {
+  const ratio = importanceRatio(relation.score);
+  return {
+    'rel-card--small': ratio < 0.25,
+    'rel-card--large': ratio > 0.7,
+  };
+}
+
+function relationCardStyle(relation) {
+  const ratio = importanceRatio(relation.score);
+  const hop = Number.isFinite(relation.hop) ? relation.hop : 1;
+  const hopIndentLevel = Math.max(0, Math.min(hop - 1, MAX_HOP_INDENT_LEVEL));
+  return {
+    '--rel-importance': ratio.toFixed(3),
+    '--rel-hop-indent': `${hopIndentLevel * HOP_INDENT_PX}px`,
+  };
+}
+
+function relationCountLabel(side, directCount, remoteCount) {
+  const total = directCount + remoteCount;
+  return `${directCount} direct ${side} relation${directCount === 1 ? '' : 's'}, ${total} visible total including further related pages`;
+}
+
+function remoteHopAttenuation(hop) {
+  return Math.pow(REMOTE_HOP_MULTIPLIER, hop - 1);
+}
+
+function stableTransitionToken(value) {
+  return value.replace(/[^a-zA-Z0-9_-]/g, '-');
+}
+
+function relationTransitionKey(relation) {
+  return relation.graphEdgeId || relation.edgeId;
+}
+
+function relationTransitionName(relation) {
+  return `${RELATION_CARD_TRANSITION_PREFIX}${stableTransitionToken(relationTransitionKey(relation))}`;
 }
 
 function findNode(id) {
@@ -638,6 +755,10 @@ const rankedRelations = computed(() => {
       pageDetailsHtml: pageHtml,
       pageMeta: `Edited ${timeAgo(t.updatedAt)} \u00b7 ${(t.visits || 0)} visit${t.visits !== 1 ? 's' : ''}`,
       score: pScore(e, t),
+      hop: 1,
+      graphEdgeId: e.id,
+      fromId: e.fromId,
+      toId: e.toId,
     };
     relation.ariaLabel = relationAriaLabel(relation);
     out.push(relation);
@@ -654,7 +775,7 @@ const outgoingRanked = computed(() =>
 );
 
 const connectorLabelLines = computed(() =>
-  connectorLines.value.filter(line => !line.isHop2)
+  connectorLines.value.filter(line => line.label)
 );
 
 function addEdgeToLookup(lookup, nodeId, edge) {
@@ -672,87 +793,118 @@ const edgeLookups = computed(() => {
   return { byFromId, byToId };
 });
 
-const hop2Incoming = computed(() => {
-  if (!currentId.value) return [];
-  const alreadyShown = new Set([
-    currentId.value,
-    ...incomingRanked.value.map(r => r.targetId),
-    ...outgoingRanked.value.map(r => r.targetId),
-  ]);
+function remoteRelationCandidate(edge, node, parent, hop, side) {
+  const score = pScore(edge, node) * remoteHopAttenuation(hop);
+  return {
+    edgeId: `${side}-hop${hop}-${edge.id}`,
+    graphEdgeId: edge.id,
+    targetId: node.id,
+    parentEdgeId: parent.edgeId,
+    fromId: edge.fromId,
+    toId: edge.toId,
+    score,
+    hop,
+    dir: side === 'incoming' ? `\u2190 ${hop} steps away` : `\u2192 ${hop} steps away`,
+    side,
+  };
+}
 
-  const results = [];
-  for (const r of incomingRanked.value) {
-    for (const edge of edgeLookups.value.byToId.get(r.targetId) || []) {
-      if (edge.toId === r.targetId && !alreadyShown.has(edge.fromId)) {
-        const node = findNode(edge.fromId);
-        if (!node) continue;
-        alreadyShown.add(node.id);
-        const score = pScore(edge, node);
-        const pageHtml = pageDetailsHtml(node);
-        results.push({
-          edgeId: `hop2-${edge.id}`,
-          targetId: node.id,
-          parentEdgeId: r.edgeId,
-          title: node.title || '(untitled)',
-          score,
-          pageDetails: extractPageDetailsFromHtml(pageHtml),
-          pageDetailsHtml: pageHtml,
-          pageMeta: `Edited ${timeAgo(node.updatedAt)} \u00b7 ${node.visits || 0} visit${node.visits !== 1 ? 's' : ''}`,
-          dir: '\u2190 2-hop',
-          side: 'incoming', // Connector positioning uses this to choose arrow endpoints.
-        });
+function hydrateRemoteRelation(relation) {
+  const edge = findEdge(relation.graphEdgeId);
+  const node = findNode(relation.targetId);
+  if (!edge || !node) {
+    console.warn(`Unable to render remote relation ${relation.edgeId} because edge ${relation.graphEdgeId} or target page ${relation.targetId} is missing.`, relation);
+    return null;
+  }
+  const relationHtml = sanitizeRichHtml(normalizeEditorHtml(edge.descHtml || ''));
+  const pageHtml = pageDetailsHtml(node);
+  const hydrated = {
+    ...relation,
+    title: node.title || '(untitled)',
+    relationLabel: extractRelationLabel(relationHtml, edge.desc),
+    relationBodyHtml: formatRelationBodyHtml(relationHtml, edge.desc),
+    pageDetails: extractPageDetailsFromHtml(pageHtml),
+    pageDetailsHtml: pageHtml,
+    pageMeta: `Edited ${timeAgo(node.updatedAt)} \u00b7 ${node.visits || 0} visit${node.visits !== 1 ? 's' : ''}`,
+  };
+  hydrated.ariaLabel = relationAriaLabel(hydrated);
+  return hydrated;
+}
+
+function isBetterRemoteCandidate(candidate, currentCandidate) {
+  return !currentCandidate
+    || candidate.score > currentCandidate.score
+    || (candidate.score === currentCandidate.score && candidate.hop < currentCandidate.hop);
+}
+
+function discoverRemoteRelations(side, directRelations) {
+  if (!currentId.value) return [];
+  const blockedNodeIds = new Set([currentId.value, ...rankedRelations.value.map(r => r.targetId)]);
+  const queuedNodeIds = new Set(blockedNodeIds);
+  const visibleByNodeId = new Map();
+  const candidatesByEdgeId = new Map();
+  const directEdgeIds = new Set(directRelations.map(r => r.edgeId));
+  const queue = directRelations.map(relation => ({ relation, hop: 1 }));
+
+  // First collect candidate remote cards, then add any ancestors needed to keep visible connector chains intact.
+  // The traversal queue includes low-scoring candidates so high-scoring descendants can still surface.
+  for (let i = 0; i < queue.length; i++) {
+    const { relation: parent, hop } = queue[i];
+    const nextHop = hop + 1;
+    const nextEdges = side === 'incoming'
+      ? edgeLookups.value.byToId.get(parent.targetId) || []
+      : edgeLookups.value.byFromId.get(parent.targetId) || [];
+
+    for (const edge of nextEdges) {
+      const targetId = side === 'incoming' ? edge.fromId : edge.toId;
+      if (blockedNodeIds.has(targetId)) continue;
+      const node = findNode(targetId);
+      if (!node) continue;
+
+      // Keep low-scoring pages in the traversal queue so stronger descendants can still surface.
+      const candidate = remoteRelationCandidate(edge, node, parent, nextHop, side);
+      candidatesByEdgeId.set(candidate.edgeId, candidate);
+      if (isBetterRemoteCandidate(candidate, visibleByNodeId.get(node.id))) {
+        if (candidate.score >= REMOTE_MIN_SCORE) {
+          visibleByNodeId.set(node.id, candidate);
+        }
       }
+      if (queuedNodeIds.has(targetId)) continue;
+      queuedNodeIds.add(targetId);
+      queue.push({ relation: candidate, hop: nextHop });
     }
   }
-  return results
-    .sort((a, b) => b.score - a.score)
-    .slice(0, 8)
-    .map(relation => ({
-      ...relation,
-      ariaLabel: relationAriaLabel(relation),
-    }));
-});
 
-const hop2Outgoing = computed(() => {
-  if (!currentId.value) return [];
-  const alreadyShown = new Set([
-    currentId.value,
-    ...incomingRanked.value.map(r => r.targetId),
-    ...outgoingRanked.value.map(r => r.targetId),
-  ]);
+  const selectedRelations = [...visibleByNodeId.values()]
+    // Select the strongest remote cards before adding ancestors needed to maintain visible connector chains.
+    .sort((a, b) => b.score - a.score || a.hop - b.hop)
+    .slice(0, REMOTE_MAX_CARDS_PER_SIDE);
 
-  const results = [];
-  for (const r of outgoingRanked.value) {
-    for (const edge of edgeLookups.value.byFromId.get(r.targetId) || []) {
-      if (edge.fromId === r.targetId && !alreadyShown.has(edge.toId)) {
-        const node = findNode(edge.toId);
-        if (!node) continue;
-        alreadyShown.add(node.id);
-        const score = pScore(edge, node);
-        const pageHtml = pageDetailsHtml(node);
-        results.push({
-          edgeId: `hop2-${edge.id}`,
-          targetId: node.id,
-          parentEdgeId: r.edgeId,
-          title: node.title || '(untitled)',
-          score,
-          pageDetails: extractPageDetailsFromHtml(pageHtml),
-          pageDetailsHtml: pageHtml,
-          pageMeta: `Edited ${timeAgo(node.updatedAt)} \u00b7 ${node.visits || 0} visit${node.visits !== 1 ? 's' : ''}`,
-          dir: '\u2192 2-hop',
-          side: 'outgoing', // Connector positioning uses this to choose arrow endpoints.
-        });
-      }
+  const selectedByEdgeId = new Map(selectedRelations.map(relation => [relation.edgeId, relation]));
+  for (const relation of selectedRelations) {
+    let parentEdgeId = relation.parentEdgeId;
+    while (parentEdgeId && !directEdgeIds.has(parentEdgeId)) {
+      const ancestor = candidatesByEdgeId.get(parentEdgeId);
+      if (!ancestor) break;
+      selectedByEdgeId.set(ancestor.edgeId, ancestor);
+      parentEdgeId = ancestor.parentEdgeId;
     }
   }
-  return results
-    .sort((a, b) => b.score - a.score)
-    .slice(0, 8)
-    .map(relation => ({
-      ...relation,
-      ariaLabel: relationAriaLabel(relation),
-    }));
-});
+
+  return [...selectedByEdgeId.values()]
+    // The final ordering includes any low-score ancestors needed to keep visible chains connected.
+    .sort((a, b) => b.score - a.score || a.hop - b.hop)
+    .map(hydrateRemoteRelation)
+    .filter(Boolean);
+}
+
+const remoteIncoming = computed(() =>
+  discoverRemoteRelations('incoming', incomingRanked.value)
+);
+
+const remoteOutgoing = computed(() =>
+  discoverRemoteRelations('outgoing', outgoingRanked.value)
+);
 
 function setRelationCardRef(edgeId, el) {
   if (el) {
@@ -782,11 +934,105 @@ function connectorPath(startX, startY, endX, endY) {
   return `M ${startX} ${startY} C ${startX + curve} ${startY}, ${endX - curve} ${endY}, ${endX} ${endY}`;
 }
 
-function connectorCenterVerticalOffset(centerHeight, cardMidpointY, centerTop) {
-  return Math.min(
-    centerHeight * CONNECTOR_CENTER_TARGET_RATIO,
-    Math.max(CONNECTOR_MIN_TARGET_OFFSET, cardMidpointY - centerTop)
-  );
+function remoteConnectorLaneX(isIncoming, endpointX, centerRect, canvasRect, laneIndex) {
+  // Distribute lane units around zero (-2..2), then scale them into pixel offsets.
+  const laneOffset = (laneIndex % REMOTE_CONNECTOR_MAX_LANES - REMOTE_CONNECTOR_LANE_CENTER_OFFSET) * REMOTE_CONNECTOR_LANE_GAP;
+  if (isIncoming) {
+    const whitespaceEdge = centerRect.left - canvasRect.left - REMOTE_CONNECTOR_LABEL_X_OFFSET;
+    return Math.min(whitespaceEdge, endpointX + REMOTE_CONNECTOR_MIN_ARC + laneOffset);
+  }
+  const whitespaceEdge = centerRect.right - canvasRect.left + REMOTE_CONNECTOR_LABEL_X_OFFSET;
+  return Math.max(whitespaceEdge, endpointX - REMOTE_CONNECTOR_MIN_ARC - laneOffset);
+}
+
+function remoteConnectorPath(startX, startY, endX, endY, laneX) {
+  return `M ${startX} ${startY} C ${laneX} ${startY}, ${laneX} ${endY}, ${endX} ${endY}`;
+}
+
+function spacedEndpointY(rect, index, count, canvasTop) {
+  const middleY = rect.top - canvasTop + rect.height / 2;
+  if (count < 2) return middleY;
+  const usableHeight = Math.max(0, rect.height - CONNECTOR_ENDPOINT_EDGE_PADDING * 2);
+  const groupHeight = Math.min(usableHeight, (count - 1) * CONNECTOR_ENDPOINT_GAP);
+  const step = groupHeight / (count - 1);
+  return middleY - groupHeight / 2 + step * index;
+}
+
+function registerEndpoint(endpointGroups, key, rect, baseY) {
+  const endpoint = { rect, baseY, y: baseY };
+  let endpoints = endpointGroups.get(key);
+  if (!endpoints) {
+    endpoints = [];
+    endpointGroups.set(key, endpoints);
+  }
+  endpoints.push(endpoint);
+  return endpoint;
+}
+
+function resolveEndpointGroups(endpointGroups, canvasTop) {
+  for (const endpoints of endpointGroups.values()) {
+    endpoints
+      .sort((a, b) => a.baseY - b.baseY)
+      .forEach((endpoint, index) => {
+        endpoint.y = spacedEndpointY(endpoint.rect, index, endpoints.length, canvasTop);
+      });
+  }
+}
+
+function relationTouchesNode(relation, nodeId) {
+  return !!nodeId && !!relation && (relation.fromId === nodeId || relation.toId === nodeId);
+}
+
+function lineEndpointNodeIds(line) {
+  return [line.relation?.fromId, line.relation?.toId].filter(Boolean);
+}
+
+function activateRelationLine(line) {
+  activeRelationEdgeId.value = line.edgeId;
+  activeRelationNodeId.value = '';
+  activeRelationNodeIdSet.value = new Set(lineEndpointNodeIds(line));
+}
+
+function activateRelationNode(nodeId) {
+  if (!nodeId) return;
+  const highlightedIds = new Set([nodeId]);
+  // Hover/focus enters are discrete; derive highlighting from the currently rendered connector set.
+  for (const line of connectorLines.value) {
+    if (!relationTouchesNode(line.relation, nodeId)) continue;
+    for (const endpointId of lineEndpointNodeIds(line)) highlightedIds.add(endpointId);
+  }
+  activeRelationEdgeId.value = '';
+  activeRelationNodeId.value = nodeId;
+  activeRelationNodeIdSet.value = highlightedIds;
+}
+
+function clearRelationHighlight() {
+  activeRelationEdgeId.value = '';
+  activeRelationNodeId.value = '';
+  activeRelationNodeIdSet.value = new Set();
+}
+
+function isNodeHighlighted(nodeId) {
+  return activeRelationNodeIdSet.value.has(nodeId);
+}
+
+function isRelationCardHighlighted(relation) {
+  return isNodeHighlighted(relation.targetId);
+}
+
+function isConnectorHighlighted(line) {
+  return activeRelationEdgeId.value === line.edgeId
+    || relationTouchesNode(line.relation, activeRelationNodeId.value);
+}
+
+function handleConnectorLabelEnter(line) {
+  activateRelationLine(line);
+  showRelationPopover(line.edgeId);
+}
+
+function handleConnectorLabelLeave() {
+  clearRelationHighlight();
+  hideRelationPopover();
 }
 
 function updateRelationConnectors() {
@@ -802,22 +1048,62 @@ function updateRelationConnectors() {
   connectorCanvas.width = Math.round(canvasRect.width);
   connectorCanvas.height = Math.round(canvasRect.height);
 
-  const nextLines = [];
+  const endpointGroups = new Map();
+  const directConnectorDescriptors = [];
+  const remoteConnectorDescriptors = [];
+
   for (const r of rankedRelations.value) {
     const card = relationCardEls.get(r.edgeId);
     if (!card) continue;
 
     const cardRect = card.getBoundingClientRect();
     const cardMidpointY = cardRect.top - canvasRect.top + cardRect.height / 2;
-    const centerTop = centerRect.top - canvasRect.top;
-    const centerAttachmentY = centerTop + connectorCenterVerticalOffset(centerRect.height, cardMidpointY, centerTop);
     const isIncoming = r.side === 'incoming';
-    const cardInnerX = (isIncoming ? cardRect.right : cardRect.left) - canvasRect.left;
-    const centerEdgeX = (isIncoming ? centerRect.left : centerRect.right) - canvasRect.left;
-    const startX = isIncoming ? cardInnerX : centerEdgeX;
-    const startY = isIncoming ? cardMidpointY : centerAttachmentY;
-    const endX = isIncoming ? centerEdgeX : cardInnerX;
-    const endY = isIncoming ? centerAttachmentY : cardMidpointY;
+    const cardSide = isIncoming ? 'right' : 'left';
+    const centerSide = isIncoming ? 'left' : 'right';
+    directConnectorDescriptors.push({
+      relation: r,
+      isIncoming,
+      cardX: (isIncoming ? cardRect.right : cardRect.left) - canvasRect.left,
+      centerX: (isIncoming ? centerRect.left : centerRect.right) - canvasRect.left,
+      cardEndpoint: registerEndpoint(endpointGroups, `card:${r.edgeId}:${cardSide}`, cardRect, cardMidpointY),
+      centerEndpoint: registerEndpoint(endpointGroups, `center:${centerSide}`, centerRect, cardMidpointY),
+    });
+  }
+
+  for (const [remoteIndex, r] of [...remoteIncoming.value, ...remoteOutgoing.value].entries()) {
+    const card = relationCardEls.get(r.edgeId);
+    const parent = relationCardEls.get(r.parentEdgeId);
+    if (!card || !parent) continue;
+
+    const cardRect = card.getBoundingClientRect();
+    const parentRect = parent.getBoundingClientRect();
+    const isIncoming = r.side === 'incoming';
+    const cardSide = isIncoming ? 'right' : 'left';
+    const parentSide = cardSide;
+    const cardX = (isIncoming ? cardRect.right : cardRect.left) - canvasRect.left;
+    const parentX = (isIncoming ? parentRect.right : parentRect.left) - canvasRect.left;
+    const cardY = cardRect.top - canvasRect.top + cardRect.height / 2;
+    const parentY = parentRect.top - canvasRect.top + parentRect.height / 2;
+    remoteConnectorDescriptors.push({
+      relation: r,
+      remoteIndex,
+      isIncoming,
+      cardX,
+      parentX,
+      cardEndpoint: registerEndpoint(endpointGroups, `card:${r.edgeId}:${cardSide}`, cardRect, cardY),
+      parentEndpoint: registerEndpoint(endpointGroups, `card:${r.parentEdgeId}:${parentSide}`, parentRect, parentY),
+    });
+  }
+
+  resolveEndpointGroups(endpointGroups, canvasRect.top);
+  const nextLines = [];
+  for (const descriptor of directConnectorDescriptors) {
+    const { relation: r, isIncoming, cardX, centerX, cardEndpoint, centerEndpoint } = descriptor;
+    const startX = isIncoming ? cardX : centerX;
+    const startY = isIncoming ? cardEndpoint.y : centerEndpoint.y;
+    const endX = isIncoming ? centerX : cardX;
+    const endY = isIncoming ? centerEndpoint.y : cardEndpoint.y;
 
     nextLines.push({
       edgeId: r.edgeId,
@@ -829,27 +1115,23 @@ function updateRelationConnectors() {
     });
   }
 
-  for (const r of [...hop2Incoming.value, ...hop2Outgoing.value]) {
-    const card = relationCardEls.get(r.edgeId);
-    const parent = relationCardEls.get(r.parentEdgeId);
-    if (!card || !parent) continue;
-
-    const cardRect = card.getBoundingClientRect();
-    const parentRect = parent.getBoundingClientRect();
-    const isIncoming = r.side === 'incoming';
-    const cardX = (isIncoming ? cardRect.right : cardRect.left) - canvasRect.left;
-    const parentX = (isIncoming ? parentRect.right : parentRect.left) - canvasRect.left;
-    const cardY = cardRect.top - canvasRect.top + cardRect.height / 2;
-    const parentY = parentRect.top - canvasRect.top + parentRect.height / 2;
+  for (const descriptor of remoteConnectorDescriptors) {
+    const { relation: r, remoteIndex, isIncoming, cardX, parentX, cardEndpoint, parentEndpoint } = descriptor;
     const startX = isIncoming ? cardX : parentX;
-    const startY = isIncoming ? cardY : parentY;
+    const startY = isIncoming ? cardEndpoint.y : parentEndpoint.y;
     const endX = isIncoming ? parentX : cardX;
-    const endY = isIncoming ? parentY : cardY;
+    const endY = isIncoming ? parentEndpoint.y : cardEndpoint.y;
+    const endpointX = isIncoming ? Math.max(cardX, parentX) : Math.min(cardX, parentX);
+    const laneX = remoteConnectorLaneX(isIncoming, endpointX, centerRect, canvasRect, remoteIndex);
 
     nextLines.push({
       edgeId: r.edgeId,
-      path: connectorPath(startX, startY, endX, endY),
-      isHop2: true,
+      path: remoteConnectorPath(startX, startY, endX, endY, laneX),
+      label: truncateText(r.relationLabel, CONNECTOR_LABEL_MAX_LENGTH),
+      relation: r,
+      labelX: laneX,
+      labelY: (startY + endY) / 2 + REMOTE_CONNECTOR_LABEL_Y_OFFSET,
+      isRemote: true,
     });
   }
 
@@ -1034,32 +1316,104 @@ async function loadNode(id) {
   scheduleConnectorUpdate();
 }
 
-async function navigateToNode(id, sourceEl = null) {
+function visibleRelations() {
+  return [
+    ...rankedRelations.value,
+    ...remoteIncoming.value,
+    ...remoteOutgoing.value,
+  ];
+}
+
+function relationCardForTarget(targetId, sourceRelation = null) {
+  const sourceKey = sourceRelation ? relationTransitionKey(sourceRelation) : '';
+  let fallbackRelation = null;
+  for (const relation of visibleRelations()) {
+    if (relation.targetId !== targetId) continue;
+    if (sourceKey && relationTransitionKey(relation) === sourceKey) {
+      return relationCardEls.get(relation.edgeId);
+    }
+    fallbackRelation ??= relation;
+  }
+  return fallbackRelation ? relationCardEls.get(fallbackRelation.edgeId) : null;
+}
+
+function setCardTransitionName(relation, name, restoreFns) {
+  const el = relationCardEls.get(relation.edgeId);
+  if (!el) return;
+  const previousName = el.style.viewTransitionName;
+  el.style.viewTransitionName = name;
+  restoreFns.push(() => { el.style.viewTransitionName = previousName; });
+}
+
+function markSharedCardTransitions(nextId, previousId, restoreFns) {
+  const transitionKeys = new Set();
+  for (const relation of visibleRelations()) {
+    if (relation.targetId === nextId || relation.targetId === previousId) continue;
+    const key = relationTransitionKey(relation);
+    if (transitionKeys.has(key)) continue;
+    transitionKeys.add(key);
+    setCardTransitionName(relation, relationTransitionName(relation), restoreFns);
+  }
+  return transitionKeys;
+}
+
+function applySharedCardTransitions(transitionKeys, previousId, restoreFns) {
+  const appliedKeys = new Set();
+  for (const relation of visibleRelations()) {
+    const key = relationTransitionKey(relation);
+    const isTargetPrevious = relation.targetId === previousId;
+    const isKeyInTransitions = transitionKeys.has(key);
+    const isAlreadyApplied = appliedKeys.has(key);
+    if (isTargetPrevious || !isKeyInTransitions || isAlreadyApplied) continue;
+    appliedKeys.add(key);
+    setCardTransitionName(relation, relationTransitionName(relation), restoreFns);
+  }
+}
+
+async function navigateToNode(id, sourceEl = null, sourceRelation = null) {
   if (!document.startViewTransition) {
     await loadNode(id);
     return;
   }
 
+  const previousId = currentId.value;
   const oldCenter = centerPanelEl.value;
+  const sourceTransitionName = sourceEl?.style.viewTransitionName ?? '';
+  const oldCenterTransitionName = oldCenter?.style.viewTransitionName ?? '';
+  const cardTransitionRestores = [];
+  const sharedTransitionKeys = markSharedCardTransitions(id, previousId, cardTransitionRestores);
+  let oldPageCardTransitionName = '';
   if (sourceEl) {
-    sourceEl.style.viewTransitionName = 'page-center';
-    if (oldCenter) oldCenter.style.viewTransitionName = 'none';
+    sourceEl.style.viewTransitionName = CENTER_TRANSITION_NAME;
+    if (oldCenter) oldCenter.style.viewTransitionName = CARD_TRANSITION_NAME;
   } else if (oldCenter) {
-    oldCenter.style.viewTransitionName = 'page-center';
+    oldCenter.style.viewTransitionName = CENTER_TRANSITION_NAME;
   }
 
+  let oldPageCard = null;
   const transition = document.startViewTransition(async () => {
     if (sourceEl) sourceEl.style.viewTransitionName = 'none';
     await loadNode(id);
     await nextTick();
-    if (centerPanelEl.value) centerPanelEl.value.style.viewTransitionName = 'page-center';
+    if (centerPanelEl.value) centerPanelEl.value.style.viewTransitionName = CENTER_TRANSITION_NAME;
+    applySharedCardTransitions(sharedTransitionKeys, previousId, cardTransitionRestores);
+    if (sourceEl && previousId) {
+      oldPageCard = relationCardForTarget(previousId, sourceRelation);
+      if (oldPageCard) {
+        oldPageCardTransitionName = oldPageCard.style.viewTransitionName;
+        oldPageCard.style.viewTransitionName = CARD_TRANSITION_NAME;
+      }
+    }
   });
 
   try {
     await transition.finished;
   } finally {
-    if (sourceEl) sourceEl.style.viewTransitionName = '';
+    if (sourceEl) sourceEl.style.viewTransitionName = sourceTransitionName;
+    if (oldCenter) oldCenter.style.viewTransitionName = oldCenterTransitionName;
+    if (oldPageCard) oldPageCard.style.viewTransitionName = oldPageCardTransitionName;
     if (centerPanelEl.value) centerPanelEl.value.style.viewTransitionName = 'none';
+    for (const restore of cardTransitionRestores) restore();
   }
 }
 
@@ -1119,6 +1473,8 @@ function openModal() {
     w: DEFAULT_EDGE_WEIGHT,
     desc: '',
     descDelta: '',
+    editFromId: '',
+    editToId: '',
   });
   openRelationEditorAfterModalUpdate();
 }
@@ -1128,20 +1484,29 @@ function openRelationEditorAfterModalUpdate() {
 }
 
 function openEditRelationModal(relation) {
-  const edge = findEdge(relation.edgeId);
-  const target = findNode(relation.targetId);
-  if (!edge || !target) return;
+  const edge = findEdge(relation.graphEdgeId);
+  if (!edge) return;
+  const isCurrentRelation = edge.fromId === currentId.value || edge.toId === currentId.value;
+  // Remote connector labels edit the actual edge direction, so the picker represents the edge's to-node.
+  const targetId = isCurrentRelation
+    ? relation.targetId
+    : edge.toId;
+  const target = findNode(targetId);
+  if (!target) return;
   Object.assign(modal, {
     on: true,
     mode: 'edit',
     edgeId: edge.id,
-    targetId: relation.targetId,
+    targetId,
     targetSearch: target.title || '',
     editorError: '',
-    dir: relation.side === 'incoming' ? 'in' : 'out',
+    dir: isCurrentRelation && relation.side === 'incoming' ? 'in' : 'out',
     w: edge.weight || DEFAULT_EDGE_WEIGHT,
     desc: edge.desc || '',
     descDelta: edge.descDelta || '',
+    // Current-page edits derive endpoints from direction; remote edits pin the source and selected target.
+    editFromId: isCurrentRelation ? '' : edge.fromId,
+    editToId: isCurrentRelation ? '' : edge.toId,
   });
   relPopover.edgeId = '';
   relPopover.pinned = false;
@@ -1156,11 +1521,24 @@ function closeModal() {
 function selectModalTarget(node) {
   modal.targetId = node.id;
   modal.targetSearch = node.title || '';
+  // Remote relation edits keep their original source and update only the selected target.
+  if (modal.editFromId) modal.editToId = node.id;
 }
 
 function createModalTarget() {
   const node = createGraphNode(modal.targetSearch.trim());
   selectModalTarget(node);
+}
+
+function relationEndpointsForSave() {
+  const cid = currentId.value;
+  if (modal.editFromId) {
+    return { from: modal.editFromId, to: modal.editToId };
+  }
+  return {
+    from: modal.dir === 'in' ? modal.targetId : cid,
+    to: modal.dir === 'in' ? cid : modal.targetId,
+  };
 }
 
 function saveRel() {
@@ -1169,9 +1547,7 @@ function saveRel() {
     modal.editorError = 'Unable to save because the relationship editor is unavailable. Close this dialog and try again, or refresh the page if the problem continues.';
     return;
   }
-  const cid = currentId.value;
-  const from = modal.dir === 'in' ? modal.targetId : cid;
-  const to = modal.dir === 'in' ? cid : modal.targetId;
+  const { from, to } = relationEndpointsForSave();
   const desc = relEditor.getText().trim();
   const descDelta = JSON.stringify(sanitizeRichDelta(relEditor.getContents()));
   const descHtml = sanitizeRichHtml(normalizeEditorHtml(relEditor.root.innerHTML));
@@ -1209,6 +1585,10 @@ function dropEdge(eid) {
   scheduleConnectorUpdate();
 }
 
+function dropRelationEdge(relation) {
+  if (relation.graphEdgeId) dropEdge(relation.graphEdgeId);
+}
+
 function showRelationPopover(edgeId) {
   if (relPopover.pinned && relPopover.edgeId !== edgeId) return;
   relPopover.edgeId = edgeId;
@@ -1231,7 +1611,7 @@ function toggleRelationPopover(edgeId) {
 function handleRelationCardClick(evt, relation) {
   relPopover.edgeId = '';
   relPopover.pinned = false;
-  navigateToNode(relation.targetId, evt.currentTarget);
+  navigateToNode(relation.targetId, evt.currentTarget, relation);
 }
 
 // ── Export ────────────────────────────────────────────────────────────
@@ -1372,7 +1752,7 @@ watch(listOpen, (open, _oldValue, onCleanup) => {
   onCleanup(() => document.removeEventListener('pointerdown', onPointerDown));
 });
 
-watch(rankedRelations, async () => {
+watch([rankedRelations, remoteIncoming, remoteOutgoing], async () => {
   await nextTick();
   scheduleConnectorUpdate();
 }, { flush: 'post' });

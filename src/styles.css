@@ -189,6 +189,13 @@ body {
   gap: 24px;
   position: relative;
   z-index: 2;
+  border-radius: var(--r);
+  transition: box-shadow .15s ease, outline-color .15s ease;
+}
+
+.resource-panel.rel-panel--connected-active {
+  outline: 1px solid rgba(129, 140, 248, .42);
+  box-shadow: 0 0 0 4px rgba(129, 140, 248, .08);
 }
 
 /* Title */
@@ -345,7 +352,15 @@ body {
 
 .rel-empty { font-size: 13px; color: var(--dim); }
 
-.rel-column { display: flex; flex-direction: column; gap: 12px; }
+.rel-column {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.rel-column--remote {
+  margin-top: 4px;
+}
 
 .rel-card {
   background: var(--surface);
@@ -362,8 +377,18 @@ body {
 }
 
 .rel-card--side {
-  min-height: 132px;
-  max-height: 196px;
+  min-height: calc(108px + var(--rel-importance, 0) * 54px);
+  max-height: calc(148px + var(--rel-importance, 0) * 92px);
+  margin-left: var(--rel-hop-indent, 0);
+}
+
+.rel-card--small {
+  opacity: .78;
+}
+
+.rel-card--large {
+  border-color: rgba(129,140,248,.48);
+  box-shadow: 0 0 0 1px rgba(129,140,248,.08);
 }
 
 .rel-card--side:focus-visible {
@@ -375,6 +400,12 @@ body {
   background: var(--accent-g);
   transform: translateY(-1px);
   box-shadow: 0 4px 18px rgba(0,0,0,.35);
+}
+
+.rel-card--connected-active {
+  border-color: rgba(129, 140, 248, .82);
+  background: color-mix(in srgb, var(--surface) 78%, var(--accent) 22%);
+  box-shadow: 0 0 0 2px rgba(129, 140, 248, .16), 0 8px 24px rgba(0,0,0,.36);
 }
 
 .rel-dir {
@@ -394,7 +425,7 @@ body {
 }
 
 .rel-page-details {
-  max-height: 74px;
+  max-height: calc(52px + var(--rel-importance, 0) * 58px);
   overflow-y: auto;
   padding-right: 3px;
   white-space: normal;
@@ -409,7 +440,7 @@ body {
 .rel-page-preview img {
   display: block;
   max-width: 100%;
-  max-height: 70px;
+  max-height: calc(48px + var(--rel-importance, 0) * 42px);
   height: auto;
   object-fit: contain;
 }
@@ -530,14 +561,28 @@ body {
   fill: none;
   stroke: rgba(129, 140, 248, .48);
   stroke-width: 1.5;
+  pointer-events: stroke;
+  cursor: pointer;
+  transition: stroke .14s ease, stroke-width .14s ease, filter .14s ease;
 }
 
 .rel-connector marker path { fill: var(--accent); }
 
-.rel-connector--hop2 path {
+.rel-connector--active path {
+  stroke: rgba(165, 180, 252, .95);
+  stroke-width: 2.7;
+  filter: drop-shadow(0 0 6px rgba(129, 140, 248, .38));
+}
+
+.rel-connector--remote path {
   stroke: rgba(129, 140, 248, .32);
   stroke-dasharray: 4 4;
   stroke-width: 1.2;
+}
+
+.rel-connector--remote.rel-connector--active path {
+  stroke: rgba(165, 180, 252, .85);
+  stroke-width: 2.2;
 }
 
 .rel-connector-labels {
@@ -553,7 +598,8 @@ body {
   z-index: 1;
 }
 
-.rel-connector-hotspot.active {
+.rel-connector-hotspot.active,
+.rel-connector-hotspot--active {
   z-index: 20;
 }
 
@@ -580,6 +626,7 @@ body {
 }
 
 .rel-connector-hotspot.active .rel-connector-label,
+.rel-connector-hotspot--active .rel-connector-label,
 .rel-connector-label:hover,
 .rel-connector-label:focus-visible {
   color: var(--text);
@@ -1011,6 +1058,12 @@ body {
 ::view-transition-new(page-center) {
   animation: 220ms ease both vt-fade-in;
 }
+::view-transition-old(page-card) {
+  animation: 220ms ease both vt-fade-out;
+}
+::view-transition-new(page-card) {
+  animation: 220ms ease both vt-fade-in;
+}
 @keyframes vt-fade-out {
   from { opacity: 1; transform: scale(1); }
   to   { opacity: 0; transform: scale(0.97); }
@@ -1019,14 +1072,12 @@ body {
   from { opacity: 0; transform: scale(1.02); }
   to   { opacity: 1; transform: scale(1); }
 }
-.rel-card--hop2 {
-  font-size: 0.6em;
-  min-height: unset;
-  max-height: 120px;
-  opacity: 0.75;
+.rel-card--remote {
+  font-size: .86em;
+  opacity: calc(.62 + var(--rel-importance, 0) * .32);
   border-style: dashed;
 }
-.rel-card--hop2:hover {
+.rel-card--remote:hover {
   opacity: 1;
 }
 .rel-hop-label {
