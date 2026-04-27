@@ -1203,14 +1203,14 @@ function triggerImportData() {
 
 function parseImportedGraph(raw) {
   const parsed = JSON.parse(raw);
-  if (!parsed || typeof parsed !== 'object' || !Array.isArray(parsed.nodes) || !Array.isArray(parsed.edges)) {
+  if (!parsed || Array.isArray(parsed) || typeof parsed !== 'object' || !Array.isArray(parsed.nodes) || !Array.isArray(parsed.edges)) {
     throw new Error('Import must be a JSON object with nodes and edges arrays.');
   }
 
-  const nodesById = new Set();
+  const nodeIds = new Set();
   const importedNodes = parsed.nodes.filter(node => {
     if (!node || typeof node !== 'object' || typeof node.id !== 'string' || !node.id) return false;
-    nodesById.add(node.id);
+    nodeIds.add(node.id);
     return true;
   });
   const importedEdges = parsed.edges.filter(edge =>
@@ -1219,8 +1219,8 @@ function parseImportedGraph(raw) {
       && typeof edge.id === 'string'
       && typeof edge.fromId === 'string'
       && typeof edge.toId === 'string'
-      && nodesById.has(edge.fromId)
-      && nodesById.has(edge.toId)
+      && nodeIds.has(edge.fromId)
+      && nodeIds.has(edge.toId)
   );
 
   return { nodes: importedNodes, edges: importedEdges };
@@ -1250,7 +1250,7 @@ async function importDataFromFile(event) {
     await nextTick();
     if (nodes.value.length) {
       const latest = latestUpdatedNode();
-      await loadNode(latest.id);
+      if (latest) await loadNode(latest.id);
     } else {
       scheduleConnectorUpdate();
     }
@@ -1299,7 +1299,7 @@ onMounted(async () => {
 
   if (nodes.value.length) {
     const latest = latestUpdatedNode();
-    await loadNode(latest.id);
+    if (latest) await loadNode(latest.id);
   }
   scheduleConnectorUpdate();
 });
