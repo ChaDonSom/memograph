@@ -802,10 +802,8 @@ function remoteRelationCandidate(edge, node, parent, hop, side) {
     parentEdgeId: parent.edgeId,
     fromId: edge.fromId,
     toId: edge.toId,
-    title: node.title || '(untitled)',
     score,
     hop,
-    pageMeta: `Edited ${timeAgo(node.updatedAt)} \u00b7 ${node.visits || 0} visit${node.visits !== 1 ? 's' : ''}`,
     dir: side === 'incoming' ? `\u2190 ${hop} steps away` : `\u2192 ${hop} steps away`,
     side,
   };
@@ -953,7 +951,7 @@ function remoteConnectorPath(startX, startY, endX, endY, laneX) {
 
 function spacedEndpointY(rect, index, count, canvasTop) {
   const middleY = rect.top - canvasTop + rect.height / 2;
-  if (count <= 1) return middleY;
+  if (count < 2) return middleY;
   const usableHeight = Math.max(0, rect.height - CONNECTOR_ENDPOINT_EDGE_PADDING * 2);
   const groupHeight = Math.min(usableHeight, (count - 1) * CONNECTOR_ENDPOINT_GAP);
   const step = groupHeight / (count - 1);
