@@ -114,10 +114,10 @@
               :aria-label="r.ariaLabel"
               @click="handleRelationCardClick($event, r)"
               @keydown.enter.self.prevent="loadNode(r.targetId)"
-              @keydown.space.self.prevent="showPrev(r.targetId, $event)"
-              @mouseenter="showPrev(r.targetId, $event)"
+              @keydown.space.self.prevent="showPagePreview(r.targetId, $event)"
+              @mouseenter="showPagePreview(r.targetId, $event)"
               @mouseleave="hidePrev"
-              @focusin="showPrev(r.targetId, $event)"
+              @focusin="showPagePreview(r.targetId, $event)"
               @focusout="hidePrev"
             >
               <div class="rel-dir">{{ r.dir }}</div>
@@ -189,10 +189,10 @@
               :aria-label="r.ariaLabel"
               @click="handleRelationCardClick($event, r)"
               @keydown.enter.self.prevent="loadNode(r.targetId)"
-              @keydown.space.self.prevent="showPrev(r.targetId, $event)"
-              @mouseenter="showPrev(r.targetId, $event)"
+              @keydown.space.self.prevent="showPagePreview(r.targetId, $event)"
+              @mouseenter="showPagePreview(r.targetId, $event)"
               @mouseleave="hidePrev"
-              @focusin="showPrev(r.targetId, $event)"
+              @focusin="showPagePreview(r.targetId, $event)"
               @focusout="hidePrev"
             >
               <div class="rel-dir">{{ r.dir }}</div>
@@ -748,7 +748,7 @@ function extractPagePreview(node) {
 
 function relationAriaLabel(relation) {
   const preview = decodeHtmlEntities(relation.pagePreview);
-  return `${relation.dir} ${relation.title}. ${preview}. Press Space to preview page; press Enter to open related page.`;
+  return `${relation.dir} ${relation.title}. ${preview}. Press Space to preview related page details; press Enter to open related page.`;
 }
 
 function findNode(id) {
@@ -1153,7 +1153,7 @@ function toggleRelationPopover(edgeId) {
 }
 
 // ── Hover preview ─────────────────────────────────────────────────────
-function showPrev(tid, evt) {
+function showPagePreview(tid, evt) {
   const t = findNode(tid);
   if (!t) return;
   const rect = evt.currentTarget.getBoundingClientRect();
@@ -1174,7 +1174,9 @@ function handleRelationCardClick(evt, relation) {
       loadNode(relation.targetId);
       return;
     }
-    showPrev(relation.targetId, evt);
+    relPopover.edgeId = '';
+    relPopover.pinned = false;
+    showPagePreview(relation.targetId, evt);
     return;
   }
   loadNode(relation.targetId);
