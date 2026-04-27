@@ -668,7 +668,7 @@ function stableTransitionToken(value) {
   // djb2 is sufficient here: it keeps generated view-transition names short and stable for local edge IDs.
   let hash = DJB2_HASH_INITIAL;
   for (let i = 0; i < value.length; i++) {
-    hash = ((hash << 5) + hash) ^ value.charCodeAt(i);
+    hash = Math.imul(hash, 33) ^ value.charCodeAt(i);
   }
   return (hash >>> 0).toString(36);
 }
@@ -1192,7 +1192,10 @@ function applySharedCardTransitions(transitionKeys, previousId, restoreFns) {
   const appliedKeys = new Set();
   for (const relation of visibleRelations()) {
     const key = relationTransitionKey(relation);
-    if (relation.targetId === previousId || !transitionKeys.has(key) || appliedKeys.has(key)) continue;
+    const isTargetPrevious = relation.targetId === previousId;
+    const isKeyInTransitions = transitionKeys.has(key);
+    const isAlreadyApplied = appliedKeys.has(key);
+    if (isTargetPrevious || !isKeyInTransitions || isAlreadyApplied) continue;
     appliedKeys.add(key);
     setCardTransitionName(relation, relationTransitionName(relation), restoreFns);
   }
@@ -1331,6 +1334,7 @@ function openEditRelationModal(relation) {
     w: edge.weight || DEFAULT_EDGE_WEIGHT,
     desc: edge.desc || '',
     descDelta: edge.descDelta || '',
+    // Current-page edits derive endpoints from direction; remote edits pin the source and selected target.
     editFromId: isCurrentRelation ? '' : edge.fromId,
     editToId: isCurrentRelation ? '' : edge.toId,
   });
