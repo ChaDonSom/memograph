@@ -88,7 +88,7 @@
               class="rel-popover"
               @click.stop
             >
-              <div class="rel-popover-title">{{ relationForEdge(line.edgeId).firstLine }}</div>
+              <div class="rel-popover-title">{{ relationForEdge(line.edgeId).relationLabel }}</div>
               <div class="rel-popover-body" v-html="relationForEdge(line.edgeId).relationBodyHtml"></div>
               <div class="rel-popover-actions">
                 <button class="btn btn-ghost" @click="openEditRelationModal(relationForEdge(line.edgeId))">Edit relation</button>
@@ -689,6 +689,14 @@ function sanitizeRichDelta(delta) {
   };
 }
 
+function normalizeNewlines(text = '') {
+  return text.replace(/\r\n/g, '\n');
+}
+
+function firstNormalizedLine(text = '') {
+  return normalizeNewlines(text).split('\n')[0].trim();
+}
+
 function splitRelationDescription(desc = '') {
   const [label = '', ...detailLines] = normalizeNewlines(desc).split('\n');
   return {
@@ -720,14 +728,6 @@ function escapeHtml(text = '') {
 
 function truncateText(text = '', maxLength) {
   return text.length > maxLength ? `${text.slice(0, maxLength - 1).trimEnd()}…` : text;
-}
-
-function firstNormalizedLine(text = '') {
-  return normalizeNewlines(text).split('\n')[0].trim();
-}
-
-function normalizeNewlines(text = '') {
-  return text.replace(/\r\n/g, '\n');
 }
 
 function extractRelationPreview(relationHtml, desc = '') {
@@ -795,7 +795,7 @@ const rankedRelations = computed(() => {
       relationBodyHtml: relationBodyHtml(relationHtml, e.desc),
       dir,
       side,
-      firstLine: extractRelationPreview(relationHtml, e.desc),
+      relationLabel: extractRelationPreview(relationHtml, e.desc),
       pagePreview: extractPagePreview(t),
       pageMeta: `Edited ${timeAgo(t.updatedAt)} · ${(t.visits || 0)} visit${t.visits !== 1 ? 's' : ''}`,
       score: pScore(e, t),
@@ -874,7 +874,7 @@ function updateRelationConnectors() {
     nextLines.push({
       edgeId: r.edgeId,
       path: connectorPath(startX, startY, endX, endY, r.side),
-      label: truncateText(r.firstLine, CONNECTOR_LABEL_MAX_LENGTH),
+      label: truncateText(r.relationLabel, CONNECTOR_LABEL_MAX_LENGTH),
       labelX: (startX + endX) / 2,
       labelY: (startY + endY) / 2 - 8,
     });
@@ -1049,6 +1049,10 @@ function openModal() {
     desc: '',
     descDelta: '',
   });
+  openRelationEditorAfterModalUpdate();
+}
+
+function openRelationEditorAfterModalUpdate() {
   nextTick(initRelationEditor);
 }
 
@@ -1070,7 +1074,7 @@ function openEditRelationModal(relation) {
   });
   relPopover.edgeId = '';
   relPopover.pinned = false;
-  nextTick(initRelationEditor);
+  openRelationEditorAfterModalUpdate();
 }
 
 function closeModal() {
