@@ -45,77 +45,164 @@
 
   <!-- ── Main: editor ─────────────────────────── -->
   <div class="main" v-if="current">
-    <div class="main-scroll">
-
-      <!-- Title -->
-      <div>
-        <input
-          class="page-title"
-          v-model="current.title"
-          placeholder="Page title…"
-          @input="queueSave"
-        />
-        <div class="page-meta">
-          <span>Edited {{ timeAgo(current.updatedAt) }}</span>
-          <span>{{ current.visits || 0 }} visit{{ current.visits !== 1 ? 's' : '' }}</span>
-        </div>
-      </div>
-
-      <!-- Quill editor -->
-      <div class="editor-wrap">
-        <div id="qeditor"></div>
-      </div>
-
-      <!-- Page actions -->
-      <div class="page-actions">
-        <button class="btn btn-danger" @click="deletePage">Delete page</button>
-      </div>
-
-      <!-- Relations -->
-      <div class="rel-section">
-        <div class="rel-head">
-          <span class="rel-label">Relations</span>
-          <button class="btn-add-rel" @click="openModal">+ Add relation</button>
-        </div>
-
-        <div class="rel-grid" v-if="ranked.length">
+    <div class="main-scroll" ref="mainScrollEl">
+      <div class="relationship-canvas" ref="relationshipCanvasEl">
+        <svg
+          class="rel-connectors"
+          v-show="connectorLines.length"
+          :width="connectorCanvas.width"
+          :height="connectorCanvas.height"
+          :viewBox="`0 0 ${connectorCanvas.width} ${connectorCanvas.height}`"
+          aria-hidden="true"
+        >
+          <defs>
+            <marker id="rel-arrowhead" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto" markerUnits="strokeWidth">
+              <path d="M 0 0 L 8 4 L 0 8 z" />
+            </marker>
+          </defs>
+          <g v-for="line in connectorLines" :key="line.edgeId" class="rel-connector">
+            <path :d="line.path" marker-end="url(#rel-arrowhead)" />
+          </g>
+        </svg>
+        <div class="rel-connector-labels" v-show="connectorLines.length">
           <div
-            v-for="r in ranked"
-            :key="r.edgeId"
-            class="rel-card"
-            @click="loadNode(r.targetId)"
-            @mouseenter="showPrev($event, r.targetId)"
-            @mouseleave="hidePrev"
+            v-for="line in connectorLines"
+            :key="line.edgeId"
+            class="rel-connector-hotspot"
+            :class="{ active: relPopover.edgeId === line.edgeId }"
+            :style="{ left: line.labelX + 'px', top: line.labelY + 'px' }"
+            @mouseenter="showRelationPopover(line.edgeId)"
+            @mouseleave="hideRelationPopover"
+            @focusin="showRelationPopover(line.edgeId)"
+            @focusout="hideRelationPopover"
           >
-            <div class="rel-dir">{{ r.dir }}</div>
-            <!-- Incoming: other page is the subject, its title leads -->
-            <template v-if="r.dir.startsWith('←')">
-              <div class="rel-title">{{ r.title }}</div>
-              <div class="rel-rich" v-if="r.relationHtml" v-html="r.relationHtml"></div>
-              <template v-else>
-                <div class="rel-label-text" v-if="r.label">{{ r.label }}</div>
-                <div class="rel-detail" v-if="r.detail">{{ r.detail }}</div>
-              </template>
-            </template>
-            <!-- Outgoing: relation label is the predicate, target title follows -->
-            <template v-else>
-              <div class="rel-rich" v-if="r.relationHtml" v-html="r.relationHtml"></div>
-              <div class="rel-label-text" v-else-if="r.label">{{ r.label }}</div>
-              <div class="rel-title">{{ r.title }}</div>
-              <div class="rel-detail" v-if="!r.relationHtml && r.detail">{{ r.detail }}</div>
-            </template>
-            <div class="rel-foot">
-              <span class="rel-score">P={{ r.score.toFixed(1) }}</span>
-              <button class="rel-del" @click.stop="dropEdge(r.edgeId)" title="Remove relation">✕</button>
+            <button
+              type="button"
+              class="rel-connector-label"
+              @click.stop="toggleRelationPopover(line.edgeId)"
+            >
+              {{ line.label }}
+            </button>
+            <div
+              v-if="relPopover.edgeId === line.edgeId"
+              class="rel-popover"
+              @click.stop
+            >
+              <div class="rel-popover-title">{{ line.relation.relationLabel }}</div>
+              <div class="rel-popover-body" v-html="line.relation.relationBodyHtml"></div>
+              <div class="rel-popover-actions">
+                <button class="btn btn-ghost" @click="openEditRelationModal(line.relation)">Edit relation</button>
+                <button class="btn btn-danger" @click="dropEdge(line.edgeId)">Delete relation</button>
+              </div>
             </div>
           </div>
         </div>
 
-        <div class="rel-empty" v-else>
-          No relations yet. Add one above to connect this page to another.
-        </div>
-      </div>
+        <section class="relation-side relation-side--incoming" aria-label="Incoming relationships">
+          <div class="relation-side-head">
+            <span class="rel-label">Incoming</span>
+            <span class="rel-count">{{ incomingRanked.length }}</span>
+          </div>
+          <div class="rel-column" v-if="incomingRanked.length">
+            <div
+              v-for="r in incomingRanked"
+              :key="r.edgeId"
+              :ref="el => setRelationCardRef(r.edgeId, el)"
+              class="rel-card rel-card--side"
+              role="button"
+              tabindex="0"
+              :aria-label="r.ariaLabel"
+              @click="handleRelationCardClick($event, r)"
+              @keydown.enter.self.prevent="loadNode(r.targetId)"
+              @keydown.space.self.prevent="loadNode(r.targetId)"
+            >
+              <div class="rel-dir">{{ r.dir }}</div>
+              <div class="rel-title">{{ r.title }}</div>
+              <div class="rel-label-text rel-page-details">{{ r.pageDetails }}</div>
+              <div class="rel-foot">
+                <span class="rel-score">P={{ r.score.toFixed(1) }}</span>
+                <span class="rel-page-meta">{{ r.pageMeta }}</span>
+              </div>
+              <div class="rel-card-actions">
+                <button class="rel-action" @click.stop="loadNode(r.targetId)" @keydown.stop>Edit page</button>
+                <button class="rel-action rel-action--danger" @click.stop="deleteRelatedPage(r.targetId)" @keydown.stop>Delete page</button>
+              </div>
+            </div>
+          </div>
+          <div class="rel-empty" v-else>No incoming relations.</div>
+        </section>
 
+        <section class="resource-panel" ref="centerPanelEl" aria-label="Current page">
+          <!-- Title -->
+          <div>
+            <input
+              class="page-title"
+              v-model="current.title"
+              placeholder="Page title…"
+              @input="queueSave"
+            />
+            <div class="page-meta">
+              <span>Edited {{ timeAgo(current.updatedAt) }}</span>
+              <span>{{ current.visits || 0 }} visit{{ current.visits !== 1 ? 's' : '' }}</span>
+            </div>
+          </div>
+
+          <!-- Quill editor -->
+          <div class="editor-wrap">
+            <div id="qeditor"></div>
+          </div>
+
+          <!-- Relations -->
+          <div class="rel-section">
+            <div class="rel-head">
+              <span class="rel-label">Relations</span>
+              <button class="btn-add-rel" @click="openModal">+ Add relation</button>
+            </div>
+            <div class="rel-empty" v-if="!rankedRelations.length">
+              No relations yet. Add one above to connect this page to another.
+            </div>
+          </div>
+
+          <!-- Page actions -->
+          <div class="page-actions">
+            <button class="btn btn-danger" @click="deletePage">Delete page</button>
+          </div>
+        </section>
+
+        <section class="relation-side relation-side--outgoing" aria-label="Outgoing relationships">
+          <div class="relation-side-head">
+            <span class="rel-label">Outgoing</span>
+            <span class="rel-count">{{ outgoingRanked.length }}</span>
+          </div>
+          <div class="rel-column" v-if="outgoingRanked.length">
+            <div
+              v-for="r in outgoingRanked"
+              :key="r.edgeId"
+              :ref="el => setRelationCardRef(r.edgeId, el)"
+              class="rel-card rel-card--side"
+              role="button"
+              tabindex="0"
+              :aria-label="r.ariaLabel"
+              @click="handleRelationCardClick($event, r)"
+              @keydown.enter.self.prevent="loadNode(r.targetId)"
+              @keydown.space.self.prevent="loadNode(r.targetId)"
+            >
+              <div class="rel-dir">{{ r.dir }}</div>
+              <div class="rel-title">{{ r.title }}</div>
+              <div class="rel-label-text rel-page-details">{{ r.pageDetails }}</div>
+              <div class="rel-foot">
+                <span class="rel-score">P={{ r.score.toFixed(1) }}</span>
+                <span class="rel-page-meta">{{ r.pageMeta }}</span>
+              </div>
+              <div class="rel-card-actions">
+                <button class="rel-action" @click.stop="loadNode(r.targetId)" @keydown.stop>Edit page</button>
+                <button class="rel-action rel-action--danger" @click.stop="deleteRelatedPage(r.targetId)" @keydown.stop>Delete page</button>
+              </div>
+            </div>
+          </div>
+          <div class="rel-empty" v-else>No outgoing relations.</div>
+        </section>
+      </div>
     </div>
   </div>
 
@@ -131,21 +218,10 @@
 
 </div>
 
-<!-- ── Hover preview ────────────────────────── -->
-<div
-  class="preview"
-  v-show="prev.on"
-  :style="{ top: prev.y + 'px', left: prev.x + 'px' }"
->
-  <div class="preview-title">{{ prev.title }}</div>
-  <div class="preview-body" v-html="prev.html"></div>
-  <div class="preview-fade"></div>
-</div>
-
 <!-- ── Add relation modal ────────────────────── -->
 <div class="overlay" v-if="modal.on" @click.self="closeModal">
   <div class="modal">
-    <div class="modal-title">Add Relation</div>
+    <div class="modal-title">{{ modalTitle }}</div>
 
     <div class="field">
       <label>Target page</label>
@@ -190,7 +266,8 @@
 
     <div class="field">
       <label>Direction</label>
-      <select v-model="modal.dir">
+      <div class="direction-static" v-if="modal.mode === 'edit'">{{ modalDirectionLabel }}</div>
+      <select v-else v-model="modal.dir">
         <option value="out">This page → target (outgoing)</option>
         <option value="in">Target → this page (incoming)</option>
         <option value="bi">Bidirectional</option>
@@ -207,14 +284,14 @@
 
     <div class="modal-btns">
       <button class="btn btn-ghost" @click="closeModal">Cancel</button>
-      <button class="btn btn-primary" @click="saveRel" :disabled="!modal.targetId || !!modal.editorError">Save</button>
+      <button class="btn btn-primary" @click="saveRel" :disabled="!modal.targetId || !!modal.editorError">{{ modalSaveLabel }}</button>
     </div>
   </div>
 </div>
 </template>
 
 <script setup>
-import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue';
+import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue';
 import Quill from 'quill';
 import { loadGraph, saveGraph } from './services/graphRepository.js';
 
@@ -223,9 +300,12 @@ const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 
 const DEFAULT_EDGE_WEIGHT = 5;
 const SAVE_DELAY_MS = 500;
 const MS_PER_DAY = 86_400_000;
-const PREVIEW_WIDTH = 300;
-const PREVIEW_GUTTER = 18;
-const PREVIEW_HEIGHT_WITH_GUTTER = 230;
+const RELATION_LABEL_TEXT_MAX_LENGTH = 72;
+// Truncation length for relationship names shown on connector labels.
+const CONNECTOR_LABEL_MAX_LENGTH = 54;
+const ARIA_LABEL_DETAILS_MAX_LENGTH = 140;
+const CONNECTOR_CENTER_TARGET_RATIO = 0.42;
+const CONNECTOR_MIN_TARGET_OFFSET = 48;
 // Keep embedded data images below a conservative URL budget because each page
 // stores both Quill delta and preview HTML in localStorage.
 const MAX_DATA_IMAGE_URL_LENGTH = 1_500_000;
@@ -269,9 +349,17 @@ const currentId = ref(null);
 const search = ref('');
 const listOpen = ref(false);
 const sidebarEl = ref(null);
+const mainScrollEl = ref(null);
+const relationshipCanvasEl = ref(null);
+const centerPanelEl = ref(null);
+const connectorLines = ref([]);
+const connectorCanvas = reactive({ width: 0, height: 0 });
+const relationCardEls = new Map();
 let editor = null;
 let relEditor = null;
 let saveTimer = null;
+let connectorFrame = null;
+let connectorResizeObserver = null;
 
 const RICH_CONTENT_TOOLBAR = [
   ['bold', 'italic', 'underline', 'strike'],
@@ -297,13 +385,17 @@ const sanitizedHtmlCache = new Map();
 
 const modal = reactive({
   on: false,
+  mode: 'add',
+  edgeId: '',
   targetId: '',
   targetSearch: '',
   editorError: '',
   dir: 'out',
   w: DEFAULT_EDGE_WEIGHT,
+  desc: '',
+  descDelta: '',
 });
-const prev = reactive({ on: false, title: '', html: '', x: 0, y: 0 });
+const relPopover = reactive({ edgeId: '', pinned: false });
 
 // ── Derived ───────────────────────────────────────────────────────────
 const current = computed(() =>
@@ -334,6 +426,20 @@ const modalTargetOptions = computed(() => {
 const modalTargetCreateLabel = computed(() => {
   const title = modal.targetSearch.trim();
   return title ? `"${title}"` : 'untitled page';
+});
+
+const modalTitle = computed(() =>
+  modal.mode === 'edit' ? 'Edit Relation' : 'Add Relation'
+);
+
+const modalSaveLabel = computed(() =>
+  modal.mode === 'edit' ? 'Save changes' : 'Save'
+);
+
+const modalDirectionLabel = computed(() => {
+  if (modal.dir === 'in') return 'Target → this page (incoming)';
+  if (modal.dir === 'bi') return 'Bidirectional';
+  return 'This page → target (outgoing)';
 });
 
 function normalizeEditorHtml(html = '') {
@@ -566,31 +672,104 @@ function sanitizeRichDelta(delta) {
   };
 }
 
+function normalizeNewlines(text = '') {
+  return text.replace(/\r\n/g, '\n');
+}
+
+function firstNormalizedLine(text = '') {
+  return normalizeNewlines(text).split('\n')[0].trim();
+}
+
 function splitRelationDescription(desc = '') {
-  const [label = '', ...detailLines] = desc.replace(/\r\n/g, '\n').split('\n');
+  const [label = '', ...detailLines] = normalizeNewlines(desc).split('\n');
   return {
     label: label.trim(),
     detail: detailLines.join('\n').replace(/\s+$/, ''),
   };
 }
 
+function richTextToPlainText(html = '') {
+  const template = document.createElement('template');
+  template.innerHTML = html;
+  return (template.content.textContent || '').replace(/\s+/g, ' ').trim();
+}
+
+function richTextFirstLine(html = '') {
+  const doc = new DOMParser().parseFromString(html, 'text/html');
+  const blocks = doc.body.querySelectorAll('p, h1, h2, h3, li, blockquote, pre');
+  for (const block of blocks) {
+    const text = (block.textContent || '').replace(/\s+/g, ' ').trim();
+    if (text) return text;
+  }
+  return firstNormalizedLine(doc.body.textContent || '');
+}
+
+function decodeHtmlEntities(text = '') {
+  const textarea = document.createElement('textarea');
+  textarea.innerHTML = text;
+  return textarea.value;
+}
+
+function escapeHtml(text = '') {
+  return text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
+}
+
+function truncateText(text = '', maxLength) {
+  return text.length > maxLength ? `${text.slice(0, maxLength - 1).trimEnd()}…` : text;
+}
+
+function extractRelationLabel(relationHtml, desc = '') {
+  const plainText = relationHtml ? richTextFirstLine(relationHtml) : firstNormalizedLine(desc);
+  return truncateText(plainText || 'Relationship', RELATION_LABEL_TEXT_MAX_LENGTH);
+}
+
+function formatRelationBodyHtml(relationHtml, desc = '') {
+  const sanitizedRelationHtml = sanitizeRichHtml(relationHtml || '');
+  if (sanitizedRelationHtml) return sanitizedRelationHtml;
+
+  const fallback = normalizeNewlines(desc).trim();
+  return `<p>${escapeHtml(fallback || 'No relationship details yet.')}</p>`;
+}
+
+function extractPageDetails(node) {
+  const plainText = node.bodyHtml ? richTextToPlainText(node.bodyHtml) : '';
+  return plainText || 'No page details yet.';
+}
+
+function relationAriaLabel(relation) {
+  const details = truncateText(decodeHtmlEntities(relation.pageDetails), ARIA_LABEL_DETAILS_MAX_LENGTH);
+  return `${relation.dir} ${relation.title}. ${details}. Press Enter or Space to open related page.`;
+}
+
 function findNode(id) {
   return nodes.value.find(n => n.id === id) ?? null;
 }
 
-const ranked = computed(() => {
+function findEdge(id) {
+  return edges.value.find(e => e.id === id) ?? null;
+}
+
+const rankedRelations = computed(() => {
   if (!currentId.value) return [];
   const cid = currentId.value;
   const out = [];
   for (const e of edges.value) {
     let tid = null;
     let dir = '';
+    let side = '';
     if (e.fromId === cid) {
       tid = e.toId;
       dir = '→ outgoing';
+      side = 'outgoing';
     } else if (e.toId === cid) {
       tid = e.fromId;
       dir = '← incoming';
+      side = 'incoming';
     }
     if (!tid) continue;
     const t = findNode(tid);
@@ -601,19 +780,122 @@ const ranked = computed(() => {
     if (!relationHtml) {
       ({ label, detail } = splitRelationDescription(e.desc));
     }
-    out.push({
+    const relation = {
       edgeId: e.id,
       targetId: tid,
       title: t.title || '(untitled)',
       label,
       detail,
       relationHtml,
+      relationBodyHtml: formatRelationBodyHtml(relationHtml, e.desc),
       dir,
+      side,
+      relationLabel: extractRelationLabel(relationHtml, e.desc),
+      pageDetails: extractPageDetails(t),
+      pageMeta: `Edited ${timeAgo(t.updatedAt)} · ${(t.visits || 0)} visit${t.visits !== 1 ? 's' : ''}`,
       score: pScore(e, t),
-    });
+    };
+    relation.ariaLabel = relationAriaLabel(relation);
+    out.push(relation);
   }
   return out.sort((a, b) => b.score - a.score);
 });
+
+const incomingRanked = computed(() =>
+  rankedRelations.value.filter(r => r.side === 'incoming')
+);
+
+const outgoingRanked = computed(() =>
+  rankedRelations.value.filter(r => r.side === 'outgoing')
+);
+
+function setRelationCardRef(edgeId, el) {
+  if (el) {
+    relationCardEls.set(edgeId, el);
+  } else {
+    relationCardEls.delete(edgeId);
+  }
+}
+
+function connectorPath(startX, startY, endX, endY, relationSide) {
+  const curve = Math.min(120, Math.max(48, Math.abs(endX - startX) * 0.45));
+  if (relationSide === 'incoming') {
+    return `M ${startX} ${startY} C ${startX + curve} ${startY}, ${endX - curve} ${endY}, ${endX} ${endY}`;
+  }
+  return `M ${startX} ${startY} C ${startX - curve} ${startY}, ${endX + curve} ${endY}, ${endX} ${endY}`;
+}
+
+function connectorCenterVerticalOffset(centerHeight, cardMidpointY, centerTop) {
+  return Math.min(
+    centerHeight * CONNECTOR_CENTER_TARGET_RATIO,
+    Math.max(CONNECTOR_MIN_TARGET_OFFSET, cardMidpointY - centerTop)
+  );
+}
+
+function updateRelationConnectors() {
+  const canvas = relationshipCanvasEl.value;
+  const center = centerPanelEl.value;
+  if (!canvas || !center || window.matchMedia('(max-width: 900px)').matches) {
+    connectorLines.value = [];
+    return;
+  }
+
+  const canvasRect = canvas.getBoundingClientRect();
+  const centerRect = center.getBoundingClientRect();
+  connectorCanvas.width = Math.round(canvasRect.width);
+  connectorCanvas.height = Math.round(canvasRect.height);
+
+  const nextLines = [];
+  for (const r of rankedRelations.value) {
+    const card = relationCardEls.get(r.edgeId);
+    if (!card) continue;
+
+    const cardRect = card.getBoundingClientRect();
+    const cardMidpointY = cardRect.top - canvasRect.top + cardRect.height / 2;
+    const centerTop = centerRect.top - canvasRect.top;
+    const centerAttachmentY = centerTop + connectorCenterVerticalOffset(centerRect.height, cardMidpointY, centerTop);
+    const isIncoming = r.side === 'incoming';
+    const cardInnerX = (isIncoming ? cardRect.right : cardRect.left) - canvasRect.left;
+    const centerEdgeX = (isIncoming ? centerRect.left : centerRect.right) - canvasRect.left;
+    const startX = isIncoming ? cardInnerX : centerEdgeX;
+    const startY = isIncoming ? cardMidpointY : centerAttachmentY;
+    const endX = isIncoming ? centerEdgeX : cardInnerX;
+    const endY = isIncoming ? centerAttachmentY : cardMidpointY;
+
+    nextLines.push({
+      edgeId: r.edgeId,
+      path: connectorPath(startX, startY, endX, endY, r.side),
+      label: truncateText(r.relationLabel, CONNECTOR_LABEL_MAX_LENGTH),
+      relation: r,
+      labelX: (startX + endX) / 2,
+      labelY: (startY + endY) / 2 - 8,
+    });
+  }
+
+  connectorLines.value = nextLines;
+}
+
+function scheduleConnectorUpdate() {
+  if (connectorFrame) cancelAnimationFrame(connectorFrame);
+  connectorFrame = requestAnimationFrame(() => {
+    connectorFrame = null;
+    updateRelationConnectors();
+  });
+}
+
+function observeConnectorTargets() {
+  if (!connectorResizeObserver) return;
+  if (relationshipCanvasEl.value) connectorResizeObserver.observe(relationshipCanvasEl.value);
+  if (centerPanelEl.value) connectorResizeObserver.observe(centerPanelEl.value);
+}
+
+function addConnectorScrollListener() {
+  mainScrollEl.value?.addEventListener('scroll', scheduleConnectorUpdate, { passive: true });
+}
+
+function removeConnectorScrollListener() {
+  mainScrollEl.value?.removeEventListener('scroll', scheduleConnectorUpdate);
+}
 
 // ── Quill ─────────────────────────────────────────────────────────────
 function initEditor() {
@@ -635,13 +917,22 @@ function initEditor() {
   });
   const node = current.value;
   if (node?.bodyDelta) {
-    try {
-      editor.setContents(JSON.parse(node.bodyDelta));
-    } catch {
+    if (!restoreEditorContents(editor, node.bodyDelta)) {
       editor.setText(node.bodyDelta);
     }
   }
   editor.on('text-change', queueSave);
+}
+
+function restoreEditorContents(quill, serializedDelta) {
+  try {
+    const parsed = JSON.parse(serializedDelta);
+    quill.setContents(sanitizeRichDelta(parsed));
+    return true;
+  } catch (error) {
+    console.warn('Unable to restore saved editor contents; falling back to plain text.', error);
+    return false;
+  }
 }
 
 function initRelationEditor() {
@@ -656,6 +947,13 @@ function initRelationEditor() {
         },
       },
     });
+    if (modal.descDelta) {
+      if (!restoreEditorContents(relEditor, modal.descDelta)) {
+        relEditor.setText(modal.desc || '');
+      }
+    } else if (modal.desc) {
+      relEditor.setText(modal.desc);
+    }
     modal.editorError = '';
   } catch (error) {
     relEditor = null;
@@ -687,6 +985,9 @@ async function loadNode(id) {
   currentId.value = id;
   await nextTick();
   initEditor();
+  observeConnectorTargets();
+  addConnectorScrollListener();
+  scheduleConnectorUpdate();
 }
 
 function createGraphNode(title = '') {
@@ -723,17 +1024,55 @@ function deletePage() {
   persist();
 }
 
+function deleteRelatedPage(id) {
+  const node = findNode(id);
+  if (!node || !confirm(`Delete "${node.title || '(untitled)'}" and all its relations?`)) return;
+  nodes.value = nodes.value.filter(n => n.id !== id);
+  edges.value = edges.value.filter(e => e.fromId !== id && e.toId !== id);
+  persist();
+  scheduleConnectorUpdate();
+}
+
 // ── Edges ─────────────────────────────────────────────────────────────
 function openModal() {
   Object.assign(modal, {
     on: true,
+    mode: 'add',
+    edgeId: '',
     targetId: '',
     targetSearch: '',
     editorError: '',
     dir: 'out',
     w: DEFAULT_EDGE_WEIGHT,
+    desc: '',
+    descDelta: '',
   });
+  openRelationEditorAfterModalUpdate();
+}
+
+function openRelationEditorAfterModalUpdate() {
   nextTick(initRelationEditor);
+}
+
+function openEditRelationModal(relation) {
+  const edge = findEdge(relation.edgeId);
+  const target = findNode(relation.targetId);
+  if (!edge || !target) return;
+  Object.assign(modal, {
+    on: true,
+    mode: 'edit',
+    edgeId: edge.id,
+    targetId: relation.targetId,
+    targetSearch: target.title || '',
+    editorError: '',
+    dir: relation.side === 'incoming' ? 'in' : 'out',
+    w: edge.weight || DEFAULT_EDGE_WEIGHT,
+    desc: edge.desc || '',
+    descDelta: edge.descDelta || '',
+  });
+  relPopover.edgeId = '';
+  relPopover.pinned = false;
+  openRelationEditorAfterModalUpdate();
 }
 
 function closeModal() {
@@ -763,6 +1102,22 @@ function saveRel() {
   const desc = relEditor.getText().trim();
   const descDelta = JSON.stringify(sanitizeRichDelta(relEditor.getContents()));
   const descHtml = sanitizeRichHtml(normalizeEditorHtml(relEditor.root.innerHTML));
+  if (modal.mode === 'edit') {
+    const edge = findEdge(modal.edgeId);
+    if (!edge) return;
+    Object.assign(edge, {
+      fromId: from,
+      toId: to,
+      desc,
+      descDelta,
+      descHtml,
+      weight: modal.w,
+    });
+    closeModal();
+    persist();
+    scheduleConnectorUpdate();
+    return;
+  }
   edges.value.push(createGraphEdge(from, to, desc, descDelta, descHtml, modal.w));
   if (modal.dir === 'bi') {
     edges.value.push(createGraphEdge(to, from, desc, descDelta, descHtml, modal.w));
@@ -774,23 +1129,37 @@ function saveRel() {
 function dropEdge(eid) {
   edges.value = edges.value.filter(e => e.id !== eid);
   persist();
+  if (relPopover.edgeId === eid) {
+    relPopover.edgeId = '';
+    relPopover.pinned = false;
+  }
+  scheduleConnectorUpdate();
 }
 
-// ── Hover preview ─────────────────────────────────────────────────────
-function showPrev(evt, tid) {
-  const t = findNode(tid);
-  if (!t) return;
-  const rect = evt.currentTarget.getBoundingClientRect();
-  const x = Math.min(rect.right + 12, window.innerWidth - PREVIEW_WIDTH - PREVIEW_GUTTER);
-  const y = Math.max(8, Math.min(rect.top, window.innerHeight - PREVIEW_HEIGHT_WITH_GUTTER));
-  prev.title = t.title || '(untitled)';
-  prev.html = sanitizeRichHtml(t.bodyHtml || '') || '<em style="opacity:.45">No content yet.</em>';
-  prev.x = x;
-  prev.y = y;
-  prev.on = true;
+function showRelationPopover(edgeId) {
+  if (relPopover.pinned && relPopover.edgeId !== edgeId) return;
+  relPopover.edgeId = edgeId;
 }
 
-function hidePrev() { prev.on = false; }
+function hideRelationPopover() {
+  if (!relPopover.pinned) relPopover.edgeId = '';
+}
+
+function toggleRelationPopover(edgeId) {
+  if (relPopover.edgeId === edgeId && relPopover.pinned) {
+    relPopover.edgeId = '';
+    relPopover.pinned = false;
+    return;
+  }
+  relPopover.edgeId = edgeId;
+  relPopover.pinned = true;
+}
+
+function handleRelationCardClick(_evt, relation) {
+  relPopover.edgeId = '';
+  relPopover.pinned = false;
+  loadNode(relation.targetId);
+}
 
 // ── Export ────────────────────────────────────────────────────────────
 function exportData() {
@@ -818,12 +1187,30 @@ watch(listOpen, (open, _oldValue, onCleanup) => {
   onCleanup(() => document.removeEventListener('pointerdown', onPointerDown));
 });
 
+watch(rankedRelations, async () => {
+  await nextTick();
+  scheduleConnectorUpdate();
+}, { flush: 'post' });
+
 // ── Mount ─────────────────────────────────────────────────────────────
 onMounted(async () => {
+  window.addEventListener('resize', scheduleConnectorUpdate);
+  connectorResizeObserver = new ResizeObserver(scheduleConnectorUpdate);
+  observeConnectorTargets();
+  addConnectorScrollListener();
+
   if (nodes.value.length) {
     const latest = [...nodes.value].sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0))[0];
     await loadNode(latest.id);
   }
+  scheduleConnectorUpdate();
+});
+
+onBeforeUnmount(() => {
+  window.removeEventListener('resize', scheduleConnectorUpdate);
+  removeConnectorScrollListener();
+  connectorResizeObserver?.disconnect();
+  if (connectorFrame) cancelAnimationFrame(connectorFrame);
 });
 
 </script>
