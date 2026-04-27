@@ -761,11 +761,17 @@ function pageDetailsHtml(node) {
   return sanitizeRichHtml(normalizeEditorHtml(node.bodyHtml || ''));
 }
 
-function extractPageDetails(bodyHtml) {
+function extractPageDetailsFromHtml(bodyHtml) {
   const plainText = bodyHtml ? richTextToPlainText(bodyHtml) : '';
   if (plainText) return plainText;
 
   return /<img[\s>]/i.test(bodyHtml) ? 'Image-only page.' : 'No page details yet.';
+}
+
+function latestUpdatedNode() {
+  return nodes.value.reduce((latest, node) =>
+    (node.updatedAt || 0) > (latest?.updatedAt || 0) ? node : latest
+  , null);
 }
 
 function relationAriaLabel(relation) {
@@ -819,7 +825,7 @@ const rankedRelations = computed(() => {
       dir,
       side,
       relationLabel: extractRelationLabel(relationHtml, e.desc),
-      pageDetails: extractPageDetails(pageHtml),
+      pageDetails: extractPageDetailsFromHtml(pageHtml),
       pageDetailsHtml: pageHtml,
       pageMeta: `Edited ${timeAgo(t.updatedAt)} · ${(t.visits || 0)} visit${t.visits !== 1 ? 's' : ''}`,
       score: pScore(e, t),
@@ -1243,7 +1249,7 @@ async function importDataFromFile(event) {
 
     await nextTick();
     if (nodes.value.length) {
-      const latest = [...nodes.value].sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0))[0];
+      const latest = latestUpdatedNode();
       await loadNode(latest.id);
     } else {
       scheduleConnectorUpdate();
@@ -1292,7 +1298,7 @@ onMounted(async () => {
   addConnectorScrollListener();
 
   if (nodes.value.length) {
-    const latest = [...nodes.value].sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0))[0];
+    const latest = latestUpdatedNode();
     await loadNode(latest.id);
   }
   scheduleConnectorUpdate();
