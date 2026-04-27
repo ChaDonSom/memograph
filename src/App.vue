@@ -727,9 +727,9 @@ function setRelationCardRef(edgeId, el) {
   }
 }
 
-function connectorPath(x1, y1, x2, y2, side) {
+function connectorPath(x1, y1, x2, y2, relationSide) {
   const curve = Math.min(120, Math.max(48, Math.abs(x2 - x1) * 0.45));
-  if (side === 'incoming') {
+  if (relationSide === 'incoming') {
     return `M ${x1} ${y1} C ${x1 + curve} ${y1}, ${x2 - curve} ${y2}, ${x2} ${y2}`;
   }
   return `M ${x1} ${y1} C ${x1 - curve} ${y1}, ${x2 + curve} ${y2}, ${x2} ${y2}`;
@@ -756,11 +756,11 @@ function updateRelationConnectors() {
     const cardRect = card.getBoundingClientRect();
     const y1 = cardRect.top - canvasRect.top + cardRect.height / 2;
     const centerTop = centerRect.top - canvasRect.top;
-    const targetOffset = Math.min(
+    const centerVerticalOffset = Math.min(
       centerRect.height * CONNECTOR_CENTER_TARGET_RATIO,
       Math.max(CONNECTOR_MIN_TARGET_OFFSET, y1 - centerTop)
     );
-    const y2 = centerTop + targetOffset;
+    const y2 = centerTop + centerVerticalOffset;
     const isIncoming = r.side === 'incoming';
     const x1 = (isIncoming ? cardRect.right : cardRect.left) - canvasRect.left;
     const x2 = (isIncoming ? centerRect.left : centerRect.right) - canvasRect.left;
