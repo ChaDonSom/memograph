@@ -1208,10 +1208,16 @@ function triggerImportData() {
   importFileInputEl.value?.click();
 }
 
+/**
+ * Returns value when it is a finite number, otherwise returns fallback.
+ */
 function finiteNumberOr(value, fallback) {
   return Number.isFinite(value) ? value : fallback;
 }
 
+/**
+ * Returns value when it is a string, otherwise returns fallback.
+ */
 function importStringOr(value, fallback = '') {
   return typeof value === 'string' ? value : fallback;
 }
