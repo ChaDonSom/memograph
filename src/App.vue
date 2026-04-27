@@ -446,6 +446,11 @@ const CONNECTOR_LABEL_MAX_LENGTH = 54;
 const ARIA_LABEL_DETAILS_MAX_LENGTH = 140;
 const CONNECTOR_CENTER_TARGET_RATIO = 0.42;
 const CONNECTOR_MIN_TARGET_OFFSET = 48;
+const CONNECTOR_VERTICAL_THRESHOLD = 24;
+const CONNECTOR_MAX_CURVE = 120;
+const CONNECTOR_MIN_CURVE = 48;
+const CONNECTOR_VERTICAL_CURVE_RATIO = 0.35;
+const CONNECTOR_HORIZONTAL_CURVE_RATIO = 0.45;
 
 const stored = loadGraph();
 const nodes = ref(stored.nodes);
@@ -752,12 +757,18 @@ function setRelationCardRef(edgeId, el) {
 
 // Both sides flow left-to-right; control points pull inward for a smooth S-curve.
 function connectorPath(startX, startY, endX, endY) {
-  if (Math.abs(endX - startX) < 24) {
-    const curveY = Math.min(120, Math.max(48, Math.abs(endY - startY) * 0.35));
+  if (Math.abs(endX - startX) < CONNECTOR_VERTICAL_THRESHOLD) {
+    const curveY = Math.min(
+      CONNECTOR_MAX_CURVE,
+      Math.max(CONNECTOR_MIN_CURVE, Math.abs(endY - startY) * CONNECTOR_VERTICAL_CURVE_RATIO)
+    );
     const direction = endY >= startY ? 1 : -1;
     return `M ${startX} ${startY} C ${startX} ${startY + curveY * direction}, ${endX} ${endY - curveY * direction}, ${endX} ${endY}`;
   }
-  const curve = Math.min(120, Math.max(48, Math.abs(endX - startX) * 0.45));
+  const curve = Math.min(
+    CONNECTOR_MAX_CURVE,
+    Math.max(CONNECTOR_MIN_CURVE, Math.abs(endX - startX) * CONNECTOR_HORIZONTAL_CURVE_RATIO)
+  );
   return `M ${startX} ${startY} C ${startX + curve} ${startY}, ${endX - curve} ${endY}, ${endX} ${endY}`;
 }
 
