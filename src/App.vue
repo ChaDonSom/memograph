@@ -811,7 +811,7 @@ function remoteRelationCandidate(edge, node, parent, hop, side) {
   };
 }
 
-function hydrateRemoteRelationWithDetails(relation) {
+function hydrateRemoteRelation(relation) {
   const edge = findEdge(relation.graphEdgeId);
   const node = findNode(relation.targetId);
   if (!edge || !node) return null;
@@ -845,7 +845,7 @@ function discoverRemoteRelations(side, directRelations) {
   const directEdgeIds = new Set(directRelations.map(r => r.edgeId));
   const queue = directRelations.map(relation => ({ relation, hop: 1 }));
 
-  // The traversal queue grows as low-scoring candidates are visited so strong descendants can still surface.
+  // The traversal queue includes low-scoring candidates so high-scoring descendants can still surface.
   for (let i = 0; i < queue.length; i++) {
     const { relation: parent, hop } = queue[i];
     const nextHop = hop + 1;
@@ -874,7 +874,7 @@ function discoverRemoteRelations(side, directRelations) {
   }
 
   const selectedRelations = [...visibleByNodeId.values()]
-    // This first ordering selects the strongest remote cards before required ancestors are added below.
+    // Select the strongest remote cards before adding ancestors needed to maintain visible connector chains.
     .sort((a, b) => b.score - a.score || a.hop - b.hop)
     .slice(0, REMOTE_MAX_CARDS_PER_SIDE);
 
@@ -892,7 +892,7 @@ function discoverRemoteRelations(side, directRelations) {
   return [...selectedByEdgeId.values()]
     // The final ordering includes any low-score ancestors needed to keep visible chains connected.
     .sort((a, b) => b.score - a.score || a.hop - b.hop)
-    .map(hydrateRemoteRelationWithDetails)
+    .map(hydrateRemoteRelation)
     .filter(Boolean);
 }
 
