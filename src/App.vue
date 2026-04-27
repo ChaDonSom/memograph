@@ -57,14 +57,46 @@
         >
           <defs>
             <marker id="rel-arrowhead" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto" markerUnits="strokeWidth">
-              <path d="M 0 0 L 8 4 L 0 8 z" />
+              <path d="M 0 0 L 8 4 L 0 8 z" fill="#818cf8" />
             </marker>
           </defs>
           <g v-for="line in connectorLines" :key="line.edgeId" class="rel-connector">
             <path :d="line.path" marker-end="url(#rel-arrowhead)" />
-            <text :x="line.labelX" :y="line.labelY">{{ line.label }}</text>
           </g>
         </svg>
+        <div class="rel-connector-labels" v-show="connectorLines.length">
+          <div
+            v-for="line in connectorLines"
+            :key="line.edgeId"
+            class="rel-connector-hotspot"
+            :class="{ active: relPopover.edgeId === line.edgeId }"
+            :style="{ left: line.labelX + 'px', top: line.labelY + 'px' }"
+            @mouseenter="showRelationPopover(line.edgeId)"
+            @mouseleave="hideRelationPopover"
+            @focusin="showRelationPopover(line.edgeId)"
+            @focusout="hideRelationPopover"
+          >
+            <button
+              type="button"
+              class="rel-connector-label"
+              @click.stop="toggleRelationPopover(line.edgeId)"
+            >
+              {{ line.label }}
+            </button>
+            <div
+              v-if="relPopover.edgeId === line.edgeId && relationForEdge(line.edgeId)"
+              class="rel-popover"
+              @click.stop
+            >
+              <div class="rel-popover-title">{{ relationForEdge(line.edgeId).firstLine }}</div>
+              <div class="rel-popover-body" v-html="relationForEdge(line.edgeId).relationBodyHtml"></div>
+              <div class="rel-popover-actions">
+                <button class="btn btn-ghost" @click="openEditRelationModal(relationForEdge(line.edgeId))">Edit relation</button>
+                <button class="btn btn-danger" @click="deleteRelationFromPopover(line.edgeId)">Delete relation</button>
+              </div>
+            </div>
+          </div>
+        </div>
 
         <section class="relation-side relation-side--incoming" aria-label="Incoming relationships">
           <div class="relation-side-head">
@@ -82,18 +114,22 @@
               :aria-label="r.ariaLabel"
               @click="handleRelationCardClick($event, r)"
               @keydown.enter.self.prevent="loadNode(r.targetId)"
-              @keydown.space.self.prevent="showRelationPreview($event, r)"
-              @mouseenter="showRelationPreview($event, r)"
+              @keydown.space.self.prevent="showPrev($event, r.targetId)"
+              @mouseenter="showPrev($event, r.targetId)"
               @mouseleave="hidePrev"
-              @focusin="showRelationPreview($event, r)"
+              @focusin="showPrev($event, r.targetId)"
               @focusout="hidePrev"
             >
               <div class="rel-dir">{{ r.dir }}</div>
               <div class="rel-title">{{ r.title }}</div>
-              <div class="rel-label-text rel-first-line">{{ r.firstLine }}</div>
+              <div class="rel-label-text rel-first-line">{{ r.pagePreview }}</div>
               <div class="rel-foot">
                 <span class="rel-score">P={{ r.score.toFixed(1) }}</span>
-                <button class="rel-del" @click.stop="dropEdge(r.edgeId)" @keydown.stop title="Remove relation">✕</button>
+                <span class="rel-page-meta">{{ r.pageMeta }}</span>
+              </div>
+              <div class="rel-card-actions">
+                <button class="rel-action" @click.stop="loadNode(r.targetId)" @keydown.stop>Edit page</button>
+                <button class="rel-action rel-action--danger" @click.stop="deleteRelatedPage(r.targetId)" @keydown.stop>Delete page</button>
               </div>
             </div>
           </div>
@@ -153,18 +189,22 @@
               :aria-label="r.ariaLabel"
               @click="handleRelationCardClick($event, r)"
               @keydown.enter.self.prevent="loadNode(r.targetId)"
-              @keydown.space.self.prevent="showRelationPreview($event, r)"
-              @mouseenter="showRelationPreview($event, r)"
+              @keydown.space.self.prevent="showPrev($event, r.targetId)"
+              @mouseenter="showPrev($event, r.targetId)"
               @mouseleave="hidePrev"
-              @focusin="showRelationPreview($event, r)"
+              @focusin="showPrev($event, r.targetId)"
               @focusout="hidePrev"
             >
               <div class="rel-dir">{{ r.dir }}</div>
               <div class="rel-title">{{ r.title }}</div>
-              <div class="rel-label-text rel-first-line">{{ r.firstLine }}</div>
+              <div class="rel-label-text rel-first-line">{{ r.pagePreview }}</div>
               <div class="rel-foot">
                 <span class="rel-score">P={{ r.score.toFixed(1) }}</span>
-                <button class="rel-del" @click.stop="dropEdge(r.edgeId)" @keydown.stop title="Remove relation">✕</button>
+                <span class="rel-page-meta">{{ r.pageMeta }}</span>
+              </div>
+              <div class="rel-card-actions">
+                <button class="rel-action" @click.stop="loadNode(r.targetId)" @keydown.stop>Edit page</button>
+                <button class="rel-action rel-action--danger" @click.stop="deleteRelatedPage(r.targetId)" @keydown.stop>Delete page</button>
               </div>
             </div>
           </div>
@@ -200,7 +240,7 @@
 <!-- ── Add relation modal ────────────────────── -->
 <div class="overlay" v-if="modal.on" @click.self="closeModal">
   <div class="modal">
-    <div class="modal-title">Add Relation</div>
+    <div class="modal-title">{{ modalTitle }}</div>
 
     <div class="field">
       <label>Target page</label>
@@ -248,7 +288,7 @@
       <select v-model="modal.dir">
         <option value="out">This page → target (outgoing)</option>
         <option value="in">Target → this page (incoming)</option>
-        <option value="bi">Bidirectional</option>
+        <option value="bi" v-if="modal.mode === 'add'">Bidirectional</option>
       </select>
     </div>
 
@@ -262,7 +302,7 @@
 
     <div class="modal-btns">
       <button class="btn btn-ghost" @click="closeModal">Cancel</button>
-      <button class="btn btn-primary" @click="saveRel" :disabled="!modal.targetId || !!modal.editorError">Save</button>
+      <button class="btn btn-primary" @click="saveRel" :disabled="!modal.targetId || !!modal.editorError">{{ modalSaveLabel }}</button>
     </div>
   </div>
 </div>
@@ -282,7 +322,8 @@ const PREVIEW_WIDTH = 300;
 const PREVIEW_GUTTER = 18;
 const PREVIEW_HEIGHT_WITH_GUTTER = 230;
 const RELATION_CARD_FIRST_LINE_LENGTH = 72;
-const CONNECTOR_LABEL_LENGTH = 34;
+const RELATED_PAGE_PREVIEW_LENGTH = 96;
+const CONNECTOR_LABEL_LENGTH = 54;
 const CONNECTOR_CENTER_TARGET_RATIO = 0.42;
 const CONNECTOR_MIN_TARGET_OFFSET = 48;
 // Keep embedded data images below a conservative URL budget because each page
@@ -364,13 +405,18 @@ const sanitizedHtmlCache = new Map();
 
 const modal = reactive({
   on: false,
+  mode: 'add',
+  edgeId: '',
   targetId: '',
   targetSearch: '',
   editorError: '',
   dir: 'out',
   w: DEFAULT_EDGE_WEIGHT,
+  desc: '',
+  descDelta: '',
 });
-const prev = reactive({ on: false, edgeId: '', title: '', html: '', x: 0, y: 0 });
+const prev = reactive({ on: false, edgeId: '', targetId: '', title: '', html: '', x: 0, y: 0 });
+const relPopover = reactive({ edgeId: '', pinned: false });
 
 // ── Derived ───────────────────────────────────────────────────────────
 const current = computed(() =>
@@ -402,6 +448,14 @@ const modalTargetCreateLabel = computed(() => {
   const title = modal.targetSearch.trim();
   return title ? `"${title}"` : 'untitled page';
 });
+
+const modalTitle = computed(() =>
+  modal.mode === 'edit' ? 'Edit Relation' : 'Add Relation'
+);
+
+const modalSaveLabel = computed(() =>
+  modal.mode === 'edit' ? 'Save changes' : 'Save'
+);
 
 function normalizeEditorHtml(html = '') {
   return html === '<p><br></p>' ? '' : html;
@@ -672,9 +726,19 @@ function extractRelationPreview(relationHtml, desc = '') {
   return truncateText(plainText || 'Relationship', RELATION_CARD_FIRST_LINE_LENGTH);
 }
 
+function relationBodyHtml(relationHtml, desc = '') {
+  const fallback = desc.replace(/\r\n/g, '\n').trim();
+  return relationHtml || `<p>${escapeHtml(fallback || 'No relationship details yet.')}</p>`;
+}
+
+function extractPagePreview(node) {
+  const plainText = node.bodyHtml ? richTextToPlainText(node.bodyHtml) : '';
+  return truncateText(plainText || 'No page details yet.', RELATED_PAGE_PREVIEW_LENGTH);
+}
+
 function relationAriaLabel(relation) {
-  const preview = decodeHtmlEntities(relation.firstLine);
-  return `${relation.dir} ${relation.title}. ${preview}. Press Space to preview relationship; press Enter to open related page.`;
+  const preview = decodeHtmlEntities(relation.pagePreview);
+  return `${relation.dir} ${relation.title}. ${preview}. Press Space to preview page; press Enter to open related page.`;
 }
 
 function findNode(id) {
@@ -714,9 +778,12 @@ const rankedRelations = computed(() => {
       label,
       detail,
       relationHtml,
+      relationBodyHtml: relationBodyHtml(relationHtml, e.desc),
       dir,
       side,
       firstLine: extractRelationPreview(relationHtml, e.desc),
+      pagePreview: extractPagePreview(t),
+      pageMeta: `Edited ${timeAgo(t.updatedAt)} · ${(t.visits || 0)} visit${t.visits !== 1 ? 's' : ''}`,
       score: pScore(e, t),
     };
     relation.ariaLabel = relationAriaLabel(relation);
@@ -732,6 +799,10 @@ const incomingRanked = computed(() =>
 const outgoingRanked = computed(() =>
   rankedRelations.value.filter(r => r.side === 'outgoing')
 );
+
+function relationForEdge(edgeId) {
+  return rankedRelations.value.find(r => r.edgeId === edgeId) ?? null;
+}
 
 function setRelationCardRef(edgeId, el) {
   if (el) {
@@ -861,6 +932,15 @@ function initRelationEditor() {
         },
       },
     });
+    if (modal.descDelta) {
+      try {
+        relEditor.setContents(JSON.parse(modal.descDelta));
+      } catch {
+        relEditor.setText(modal.desc || '');
+      }
+    } else if (modal.desc) {
+      relEditor.setText(modal.desc);
+    }
     modal.editorError = '';
   } catch (error) {
     relEditor = null;
@@ -931,16 +1011,50 @@ function deletePage() {
   persist();
 }
 
+function deleteRelatedPage(id) {
+  const node = findNode(id);
+  if (!node || !confirm(`Delete "${node.title || '(untitled)'}" and all its relations?`)) return;
+  nodes.value = nodes.value.filter(n => n.id !== id);
+  edges.value = edges.value.filter(e => e.fromId !== id && e.toId !== id);
+  persist();
+  scheduleConnectorUpdate();
+}
+
 // ── Edges ─────────────────────────────────────────────────────────────
 function openModal() {
   Object.assign(modal, {
     on: true,
+    mode: 'add',
+    edgeId: '',
     targetId: '',
     targetSearch: '',
     editorError: '',
     dir: 'out',
     w: DEFAULT_EDGE_WEIGHT,
+    desc: '',
+    descDelta: '',
   });
+  nextTick(initRelationEditor);
+}
+
+function openEditRelationModal(relation) {
+  const edge = edges.value.find(e => e.id === relation.edgeId);
+  const target = findNode(relation.targetId);
+  if (!edge || !target) return;
+  Object.assign(modal, {
+    on: true,
+    mode: 'edit',
+    edgeId: edge.id,
+    targetId: relation.targetId,
+    targetSearch: target.title || '',
+    editorError: '',
+    dir: relation.side === 'incoming' ? 'in' : 'out',
+    w: edge.weight || DEFAULT_EDGE_WEIGHT,
+    desc: edge.desc || '',
+    descDelta: edge.descDelta || '',
+  });
+  relPopover.edgeId = '';
+  relPopover.pinned = false;
   nextTick(initRelationEditor);
 }
 
@@ -971,6 +1085,22 @@ function saveRel() {
   const desc = relEditor.getText().trim();
   const descDelta = JSON.stringify(sanitizeRichDelta(relEditor.getContents()));
   const descHtml = sanitizeRichHtml(normalizeEditorHtml(relEditor.root.innerHTML));
+  if (modal.mode === 'edit') {
+    const edge = edges.value.find(e => e.id === modal.edgeId);
+    if (!edge) return;
+    Object.assign(edge, {
+      fromId: from,
+      toId: to,
+      desc,
+      descDelta,
+      descHtml,
+      weight: modal.w,
+    });
+    closeModal();
+    persist();
+    scheduleConnectorUpdate();
+    return;
+  }
   edges.value.push(createGraphEdge(from, to, desc, descDelta, descHtml, modal.w));
   if (modal.dir === 'bi') {
     edges.value.push(createGraphEdge(to, from, desc, descDelta, descHtml, modal.w));
@@ -982,6 +1112,34 @@ function saveRel() {
 function dropEdge(eid) {
   edges.value = edges.value.filter(e => e.id !== eid);
   persist();
+  if (relPopover.edgeId === eid) {
+    relPopover.edgeId = '';
+    relPopover.pinned = false;
+  }
+  scheduleConnectorUpdate();
+}
+
+function deleteRelationFromPopover(edgeId) {
+  dropEdge(edgeId);
+}
+
+function showRelationPopover(edgeId) {
+  if (relPopover.pinned && relPopover.edgeId !== edgeId) return;
+  relPopover.edgeId = edgeId;
+}
+
+function hideRelationPopover() {
+  if (!relPopover.pinned) relPopover.edgeId = '';
+}
+
+function toggleRelationPopover(edgeId) {
+  if (relPopover.edgeId === edgeId && relPopover.pinned) {
+    relPopover.edgeId = '';
+    relPopover.pinned = false;
+    return;
+  }
+  relPopover.edgeId = edgeId;
+  relPopover.pinned = true;
 }
 
 // ── Hover preview ─────────────────────────────────────────────────────
@@ -992,6 +1150,7 @@ function showPrev(evt, tid) {
   const x = Math.min(rect.right + 12, window.innerWidth - PREVIEW_WIDTH - PREVIEW_GUTTER);
   const y = Math.max(8, Math.min(rect.top, window.innerHeight - PREVIEW_HEIGHT_WITH_GUTTER));
   prev.edgeId = '';
+  prev.targetId = tid;
   prev.title = t.title || '(untitled)';
   prev.html = sanitizeRichHtml(t.bodyHtml || '') || '<em style="opacity:.45">No content yet.</em>';
   prev.x = x;
@@ -999,26 +1158,13 @@ function showPrev(evt, tid) {
   prev.on = true;
 }
 
-function showRelationPreview(evt, relation) {
-  const rect = evt.currentTarget.getBoundingClientRect();
-  const x = Math.min(rect.right + 12, window.innerWidth - PREVIEW_WIDTH - PREVIEW_GUTTER);
-  const y = Math.max(8, Math.min(rect.top, window.innerHeight - PREVIEW_HEIGHT_WITH_GUTTER));
-  const fallbackText = [relation.label, relation.detail].filter(Boolean).join('\n\n') || relation.firstLine;
-  prev.edgeId = relation.edgeId;
-  prev.title = `${relation.dir}: ${relation.title}`;
-  prev.html = sanitizeRichHtml(relation.relationHtml || '') || `<p>${escapeHtml(fallbackText || 'No relationship description.')}</p>`;
-  prev.x = x;
-  prev.y = y;
-  prev.on = true;
-}
-
 function handleRelationCardClick(evt, relation) {
   if (window.matchMedia('(hover: none)').matches) {
-    if (prev.on && prev.edgeId === relation.edgeId) {
+    if (prev.on && prev.targetId === relation.targetId) {
       loadNode(relation.targetId);
       return;
     }
-    showRelationPreview(evt, relation);
+    showPrev(evt, relation.targetId);
     return;
   }
   loadNode(relation.targetId);
@@ -1027,6 +1173,7 @@ function handleRelationCardClick(evt, relation) {
 function hidePrev() {
   prev.on = false;
   prev.edgeId = '';
+  prev.targetId = '';
 }
 
 // ── Export ────────────────────────────────────────────────────────────

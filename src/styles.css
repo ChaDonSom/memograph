@@ -165,10 +165,10 @@ body {
   position: relative;
   display: grid;
   grid-template-columns:
-    minmax(140px, clamp(160px, 18vw, 260px))
-    minmax(320px, 1fr)
-    minmax(140px, clamp(160px, 18vw, 260px));
-  gap: 24px;
+    minmax(150px, clamp(170px, 18vw, 240px))
+    minmax(320px, 620px)
+    minmax(150px, clamp(170px, 18vw, 240px));
+  gap: clamp(42px, 5vw, 72px);
   align-items: start;
 }
 
@@ -231,6 +231,7 @@ body {
 .rel-editor-wrap .ql-editor { min-height: 110px; }
 .ql-editor img,
 .preview-body img,
+.rel-popover-body img,
 .rel-rich img {
   display: block;
   max-width: 100%;
@@ -352,7 +353,7 @@ body {
 }
 
 .rel-card--side {
-  min-height: 112px;
+  min-height: 132px;
 }
 
 .rel-card--side:focus-visible {
@@ -437,6 +438,45 @@ body {
   font-variant-numeric: tabular-nums;
 }
 
+.rel-page-meta {
+  font-size: 10px;
+  color: var(--dim);
+  white-space: nowrap;
+}
+
+.rel-card-actions {
+  display: flex;
+  gap: 7px;
+  margin-top: 8px;
+}
+
+.rel-action {
+  border: 1px solid var(--border);
+  background: var(--surface2);
+  color: var(--muted);
+  border-radius: 5px;
+  padding: 4px 7px;
+  font-family: inherit;
+  font-size: 10.5px;
+  line-height: 1;
+  cursor: pointer;
+  transition: all .12s;
+}
+
+.rel-action:hover,
+.rel-action:focus-visible {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: var(--accent-d);
+}
+
+.rel-action--danger:hover,
+.rel-action--danger:focus-visible {
+  border-color: rgba(248,113,113,.35);
+  color: var(--danger);
+  background: var(--danger-d);
+}
+
 .rel-del {
   background: none;
   border: none;
@@ -470,14 +510,99 @@ body {
 
 .rel-connector marker path { fill: rgba(129, 140, 248, .72); }
 
-.rel-connector text {
-  fill: var(--muted);
-  font-size: 10px;
-  text-anchor: middle;
-  paint-order: stroke;
-  stroke: var(--bg);
-  stroke-width: 4px;
-  stroke-linejoin: round;
+.rel-connector-labels {
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+  pointer-events: none;
+}
+
+.rel-connector-hotspot {
+  position: absolute;
+  pointer-events: auto;
+}
+
+.rel-connector-label {
+  position: absolute;
+  left: 0;
+  top: 0;
+  transform: translate(-50%, -50%);
+  max-width: 220px;
+  border: 1px solid rgba(129, 140, 248, .28);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--bg) 84%, var(--accent) 16%);
+  color: var(--muted);
+  box-shadow: 0 0 0 3px var(--bg), 0 8px 24px rgba(0,0,0,.32);
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 10.5px;
+  line-height: 1.25;
+  padding: 4px 10px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  transition: all .12s;
+}
+
+.rel-connector-hotspot.active .rel-connector-label,
+.rel-connector-label:hover,
+.rel-connector-label:focus-visible {
+  color: var(--text);
+  border-color: rgba(129, 140, 248, .7);
+  background: color-mix(in srgb, var(--surface) 76%, var(--accent) 24%);
+}
+
+.rel-popover {
+  position: absolute;
+  left: 0;
+  top: 18px;
+  width: 320px;
+  max-width: min(320px, calc(100vw - 36px));
+  transform: translateX(-50%);
+  background: var(--surface);
+  border: 1px solid var(--border2);
+  border-radius: var(--r);
+  padding: 14px;
+  box-shadow: 0 18px 46px rgba(0,0,0,.72), 0 0 0 1px rgba(129,140,248,.08);
+  animation: rel-popover-in 150ms ease-out;
+}
+
+@keyframes rel-popover-in {
+  from { opacity: 0; transform: translateX(-50%) scale(.95); }
+  to { opacity: 1; transform: translateX(-50%) scale(1); }
+}
+
+.rel-popover-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text);
+  line-height: 1.35;
+  margin-bottom: 8px;
+}
+
+.rel-popover-body {
+  max-height: 170px;
+  overflow: auto;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.rel-popover-body p { margin: 0 0 5px; }
+.rel-popover-body p:last-child { margin-bottom: 0; }
+.rel-popover-body h1, .rel-popover-body h2, .rel-popover-body h3 {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+  margin-bottom: 4px;
+}
+.rel-popover-body a { color: var(--accent); }
+
+.rel-popover-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 12px;
 }
 
 /* ── Hover preview ─────────────────────────────── */
