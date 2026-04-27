@@ -22,6 +22,20 @@ export const RICH_ALLOWED_ATTRS = {
 };
 
 export const MAX_SANITIZED_HTML_CACHE_ENTRIES = 200;
+const MAX_IMAGE_WIDTH_PX = 2_000;
+
+export function sanitizeImageWidth(value) {
+  const trimmed = String(value || '').trim();
+  const match = /^(\d+(?:\.\d+)?)(%|px)$/i.exec(trimmed);
+  if (!match) return '';
+
+  const size = Number(match[1]);
+  const unit = match[2].toLowerCase();
+  if (!Number.isFinite(size) || size <= 0) return '';
+  if (unit === '%' && size > 100) return '';
+  if (unit === 'px' && size > MAX_IMAGE_WIDTH_PX) return '';
+  return `${size}${unit}`;
+}
 
 export function isSafeRichUrl(value, allowDataImage = false) {
   const trimmed = value.trim();
@@ -63,6 +77,10 @@ export function sanitizeRichHtml(html = '') {
     if (node.nodeType !== Node.ELEMENT_NODE) return;
 
     const element = node;
+    for (const child of [...element.children]) {
+      cleanNode(child);
+    }
+
     if (['SCRIPT', 'STYLE'].includes(element.tagName)) {
       element.remove();
       return;
@@ -100,16 +118,17 @@ export function sanitizeRichHtml(html = '') {
       // Preserve only width from style to support image resize feature.
       const style = element.getAttribute('style');
       if (style) {
-        const match = /width\s*:\s*(\d+(?:\.\d+)?%|\d+px)/i.exec(style);
-        element.setAttribute('style', match ? `width: ${match[1]}` : '');
-        if (!match) element.removeAttribute('style');
+        const width = sanitizeImageWidth(/width\s*:\s*([^;]+)/i.exec(style)?.[1]);
+        if (width) {
+          element.setAttribute('style', `width: ${width}`);
+        } else {
+          element.removeAttribute('style');
+        }
       }
     }
   }
 
-  let el;
-  const walker = document.createTreeWalker(template.content, NodeFilter.SHOW_ELEMENT);
-  while ((el = walker.nextNode())) {
+  for (const el of [...template.content.children]) {
     cleanNode(el);
   }
 
@@ -139,8 +158,24 @@ export function sanitizeRichDelta(delta) {
           cleaned.attributes = { ...op.attributes };
         }
 
+        const image = typeof cleaned.insert === 'object' ? cleaned.insert?.image : null;
+        const width = cleaned.attributes?.width;
+        if (width) {
+          const safeWidth = image ? sanitizeImageWidth(width) : '';
+          if (safeWidth) {
+            cleaned.attributes.width = safeWidth;
+          } else {
+            delete cleaned.attributes.width;
+          }
+        }
+
         const link = cleaned.attributes?.link;
-        if (!link || isSafeRichUrl(String(link))) return cleaned;
+        if (!link || isSafeRichUrl(String(link))) {
+          if (cleaned.attributes && !Object.keys(cleaned.attributes).length) {
+            delete cleaned.attributes;
+          }
+          return cleaned;
+        }
 
         delete cleaned.attributes.link;
         if (!Object.keys(cleaned.attributes).length) {

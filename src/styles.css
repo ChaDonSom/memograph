@@ -534,6 +534,12 @@ body {
 
 .rel-connector marker path { fill: var(--accent); }
 
+.rel-connector--hop2 path {
+  stroke: rgba(129, 140, 248, .32);
+  stroke-dasharray: 4 4;
+  stroke-width: 1.2;
+}
+
 .rel-connector-labels {
   position: absolute;
   inset: 0;
@@ -997,7 +1003,7 @@ body {
   padding: 4px 8px;
 }
 .resource-panel {
-  view-transition-name: page-center;
+  view-transition-name: none;
 }
 ::view-transition-old(page-center) {
   animation: 220ms ease both vt-fade-out;

@@ -39,7 +39,7 @@
         :key="n.id"
         class="n-item"
         :class="{ active: n.id === currentId }"
-        @click="loadNode(n.id)"
+        @click="navigateToNode(n.id)"
       >{{ n.title || '(untitled)' }}</div>
     </div>
 
@@ -77,13 +77,18 @@
               <path d="M 0 0 L 8 4 L 0 8 z" fill="var(--accent)" />
             </marker>
           </defs>
-          <g v-for="line in connectorLines" :key="line.edgeId" class="rel-connector">
+          <g
+            v-for="line in connectorLines"
+            :key="line.edgeId"
+            class="rel-connector"
+            :class="{ 'rel-connector--hop2': line.isHop2 }"
+          >
             <path :d="line.path" marker-end="url(#rel-arrowhead)" />
           </g>
         </svg>
-        <div class="rel-connector-labels" v-show="connectorLines.length">
+        <div class="rel-connector-labels" v-show="connectorLabelLines.length">
           <div
-            v-for="line in connectorLines"
+            v-for="line in connectorLabelLines"
             :key="line.edgeId"
             class="rel-connector-hotspot"
             :class="{ active: relPopover.edgeId === line.edgeId }"
@@ -130,8 +135,8 @@
               tabindex="0"
               :aria-label="r.ariaLabel"
               @click="handleRelationCardClick($event, r)"
-              @keydown.enter.self.prevent="loadNode(r.targetId)"
-              @keydown.space.self.prevent="loadNode(r.targetId)"
+              @keydown.enter.self.prevent="navigateToNode(r.targetId)"
+              @keydown.space.self.prevent="navigateToNode(r.targetId)"
             >
               <div class="rel-dir">{{ r.dir }}</div>
               <div class="rel-title">{{ r.title }}</div>
@@ -158,11 +163,14 @@
             <div
               v-for="r in hop2Incoming"
               :key="r.edgeId"
+              :ref="el => setRelationCardRef(r.edgeId, el)"
               class="rel-card rel-card--side rel-card--hop2"
               role="button"
               tabindex="0"
-              @click="loadNode(r.targetId)"
-              @keydown.enter.prevent="loadNode(r.targetId)"
+              :aria-label="r.ariaLabel"
+              @click="handleRelationCardClick($event, r)"
+              @keydown.enter.self.prevent="navigateToNode(r.targetId)"
+              @keydown.space.self.prevent="navigateToNode(r.targetId)"
             >
               <div class="rel-dir">{{ r.dir }}</div>
               <div class="rel-title">{{ r.title }}</div>
@@ -197,7 +205,9 @@
 
           <!-- Quill editor -->
           <div class="editor-wrap" style="position: relative;">
-            <div id="qeditor"></div>
+            <div data-quill-host="true">
+              <div id="qeditor"></div>
+            </div>
             <!-- Image resize toolbar -->
             <div
               v-if="imageResizeBar.visible"
@@ -244,8 +254,8 @@
               tabindex="0"
               :aria-label="r.ariaLabel"
               @click="handleRelationCardClick($event, r)"
-              @keydown.enter.self.prevent="loadNode(r.targetId)"
-              @keydown.space.self.prevent="loadNode(r.targetId)"
+              @keydown.enter.self.prevent="navigateToNode(r.targetId)"
+              @keydown.space.self.prevent="navigateToNode(r.targetId)"
             >
               <div class="rel-dir">{{ r.dir }}</div>
               <div class="rel-title">{{ r.title }}</div>
@@ -272,11 +282,14 @@
             <div
               v-for="r in hop2Outgoing"
               :key="r.edgeId"
+              :ref="el => setRelationCardRef(r.edgeId, el)"
               class="rel-card rel-card--side rel-card--hop2"
               role="button"
               tabindex="0"
-              @click="loadNode(r.targetId)"
-              @keydown.enter.prevent="loadNode(r.targetId)"
+              :aria-label="r.ariaLabel"
+              @click="handleRelationCardClick($event, r)"
+              @keydown.enter.self.prevent="navigateToNode(r.targetId)"
+              @keydown.space.self.prevent="navigateToNode(r.targetId)"
             >
               <div class="rel-dir">{{ r.dir }}</div>
               <div class="rel-title">{{ r.title }}</div>
@@ -391,6 +404,7 @@ import {
   sanitizeRichHtml,
   sanitizeRichDelta,
   normalizeEditorHtml,
+  sanitizeImageWidth,
 } from './utils/sanitize.js';
 import {
   normalizeNewlines,
@@ -402,19 +416,20 @@ import {
   escapeHtml,
   truncateText,
 } from './utils/text.js';
-import { DEFAULT_EDGE_WEIGHT, MS_PER_DAY, pScore, timeAgo } from './utils/scoring.js';
+import { DEFAULT_EDGE_WEIGHT, pScore, timeAgo } from './utils/scoring.js';
 
 // Extend Quill's Image blot to persist a width style attribute.
 const BaseImageBlot = Quill.import('formats/image');
 class ResizableImageBlot extends BaseImageBlot {
   static formats(node) {
     const formats = super.formats(node);
-    if (node.style.width) formats.width = node.style.width;
+    const width = sanitizeImageWidth(node.style.width);
+    if (width) formats.width = width;
     return formats;
   }
   format(name, value) {
     if (name === 'width') {
-      this.domNode.style.width = value || '';
+      this.domNode.style.width = sanitizeImageWidth(value) || '';
     } else {
       super.format(name, value);
     }
@@ -633,6 +648,23 @@ const outgoingRanked = computed(() =>
   rankedRelations.value.filter(r => r.side === 'outgoing')
 );
 
+const connectorLabelLines = computed(() =>
+  connectorLines.value.filter(line => !line.isHop2)
+);
+
+function groupEdgesBy(key) {
+  const groups = new Map();
+  for (const edge of edges.value) {
+    const id = edge[key];
+    if (!groups.has(id)) groups.set(id, []);
+    groups.get(id).push(edge);
+  }
+  return groups;
+}
+
+const edgesByFromId = computed(() => groupEdgesBy('fromId'));
+const edgesByToId = computed(() => groupEdgesBy('toId'));
+
 const hop2Incoming = computed(() => {
   if (!currentId.value) return [];
   const alreadyShown = new Set([
@@ -643,7 +675,7 @@ const hop2Incoming = computed(() => {
 
   const results = [];
   for (const r of incomingRanked.value) {
-    for (const edge of edges.value) {
+    for (const edge of edgesByToId.value.get(r.targetId) || []) {
       if (edge.toId === r.targetId && !alreadyShown.has(edge.fromId)) {
         const node = findNode(edge.fromId);
         if (!node) continue;
@@ -660,11 +692,14 @@ const hop2Incoming = computed(() => {
           pageDetailsHtml: pageHtml,
           pageMeta: `Edited ${timeAgo(node.updatedAt)} \u00b7 ${node.visits || 0} visit${node.visits !== 1 ? 's' : ''}`,
           dir: '\u2190 2-hop',
+          side: 'incoming',
         });
       }
     }
   }
-  return results.sort((a, b) => b.score - a.score).slice(0, 8);
+  const ranked = results.sort((a, b) => b.score - a.score).slice(0, 8);
+  ranked.forEach(relation => { relation.ariaLabel = relationAriaLabel(relation); });
+  return ranked;
 });
 
 const hop2Outgoing = computed(() => {
@@ -677,7 +712,7 @@ const hop2Outgoing = computed(() => {
 
   const results = [];
   for (const r of outgoingRanked.value) {
-    for (const edge of edges.value) {
+    for (const edge of edgesByFromId.value.get(r.targetId) || []) {
       if (edge.fromId === r.targetId && !alreadyShown.has(edge.toId)) {
         const node = findNode(edge.toId);
         if (!node) continue;
@@ -694,11 +729,14 @@ const hop2Outgoing = computed(() => {
           pageDetailsHtml: pageHtml,
           pageMeta: `Edited ${timeAgo(node.updatedAt)} \u00b7 ${node.visits || 0} visit${node.visits !== 1 ? 's' : ''}`,
           dir: '\u2192 2-hop',
+          side: 'outgoing',
         });
       }
     }
   }
-  return results.sort((a, b) => b.score - a.score).slice(0, 8);
+  const ranked = results.sort((a, b) => b.score - a.score).slice(0, 8);
+  ranked.forEach(relation => { relation.ariaLabel = relationAriaLabel(relation); });
+  return ranked;
 });
 
 function setRelationCardRef(edgeId, el) {
@@ -714,6 +752,11 @@ function setRelationCardRef(edgeId, el) {
 
 // Both sides flow left-to-right; control points pull inward for a smooth S-curve.
 function connectorPath(startX, startY, endX, endY) {
+  if (Math.abs(endX - startX) < 24) {
+    const curveY = Math.min(120, Math.max(48, Math.abs(endY - startY) * 0.35));
+    const direction = endY >= startY ? 1 : -1;
+    return `M ${startX} ${startY} C ${startX} ${startY + curveY * direction}, ${endX} ${endY - curveY * direction}, ${endX} ${endY}`;
+  }
   const curve = Math.min(120, Math.max(48, Math.abs(endX - startX) * 0.45));
   return `M ${startX} ${startY} C ${startX + curve} ${startY}, ${endX - curve} ${endY}, ${endX} ${endY}`;
 }
@@ -762,6 +805,30 @@ function updateRelationConnectors() {
       relation: r,
       labelX: (startX + endX) / 2,
       labelY: (startY + endY) / 2 - 8,
+    });
+  }
+
+  for (const r of [...hop2Incoming.value, ...hop2Outgoing.value]) {
+    const card = relationCardEls.get(r.edgeId);
+    const parent = relationCardEls.get(r.parentEdgeId);
+    if (!card || !parent) continue;
+
+    const cardRect = card.getBoundingClientRect();
+    const parentRect = parent.getBoundingClientRect();
+    const isIncoming = r.side === 'incoming';
+    const cardX = (isIncoming ? cardRect.right : cardRect.left) - canvasRect.left;
+    const parentX = (isIncoming ? parentRect.right : parentRect.left) - canvasRect.left;
+    const cardY = cardRect.top - canvasRect.top + cardRect.height / 2;
+    const parentY = parentRect.top - canvasRect.top + parentRect.height / 2;
+    const startX = isIncoming ? cardX : parentX;
+    const startY = isIncoming ? cardY : parentY;
+    const endX = isIncoming ? parentX : cardX;
+    const endY = isIncoming ? parentY : cardY;
+
+    nextLines.push({
+      edgeId: r.edgeId,
+      path: connectorPath(startX, startY, endX, endY),
+      isHop2: true,
     });
   }
 
@@ -831,7 +898,13 @@ function initEditor() {
   hideImageResizeBar();
   const wrap = document.querySelector('.editor-wrap');
   if (!wrap) return;
-  wrap.innerHTML = '<div id="qeditor"></div>';
+  let quillHost = wrap.querySelector('[data-quill-host="true"]');
+  if (!quillHost) {
+    quillHost = document.createElement('div');
+    quillHost.setAttribute('data-quill-host', 'true');
+    wrap.insertBefore(quillHost, wrap.firstChild);
+  }
+  quillHost.innerHTML = '<div id="qeditor"></div>';
   editor = new Quill('#qeditor', {
     theme: 'snow',
     placeholder: 'Write something about this page\u2026',
@@ -920,7 +993,7 @@ function pushNodeToHash(id) {
 function onHashChange() {
   const id = parseNodeIdFromHash();
   if (id && id !== currentId.value && findNode(id)) {
-    loadNode(id);
+    navigateToNode(id);
   }
 }
 
@@ -936,6 +1009,35 @@ async function loadNode(id) {
   observeConnectorTargets();
   addConnectorScrollListener();
   scheduleConnectorUpdate();
+}
+
+async function navigateToNode(id, sourceEl = null) {
+  if (!document.startViewTransition) {
+    await loadNode(id);
+    return;
+  }
+
+  const oldCenter = centerPanelEl.value;
+  if (sourceEl) {
+    sourceEl.style.viewTransitionName = 'page-center';
+    if (oldCenter) oldCenter.style.viewTransitionName = 'none';
+  } else if (oldCenter) {
+    oldCenter.style.viewTransitionName = 'page-center';
+  }
+
+  const transition = document.startViewTransition(async () => {
+    if (sourceEl) sourceEl.style.viewTransitionName = 'none';
+    await loadNode(id);
+    await nextTick();
+    if (centerPanelEl.value) centerPanelEl.value.style.viewTransitionName = 'page-center';
+  });
+
+  try {
+    await transition.finished;
+  } finally {
+    if (sourceEl) sourceEl.style.viewTransitionName = '';
+    if (centerPanelEl.value) centerPanelEl.value.style.viewTransitionName = 'none';
+  }
 }
 
 function createGraphNode(title = '') {
@@ -1106,32 +1208,7 @@ function toggleRelationPopover(edgeId) {
 function handleRelationCardClick(evt, relation) {
   relPopover.edgeId = '';
   relPopover.pinned = false;
-
-  if (!document.startViewTransition) {
-    loadNode(relation.targetId);
-    return;
-  }
-
-  // Morph the clicked card into the center panel position.
-  const cardEl = evt.currentTarget;
-  cardEl.style.viewTransitionName = 'page-center';
-  if (centerPanelEl.value) centerPanelEl.value.style.viewTransitionName = '';
-
-  const transition = document.startViewTransition(async () => {
-    try {
-      cardEl.style.viewTransitionName = '';
-      await loadNode(relation.targetId);
-      await nextTick();
-      if (centerPanelEl.value) centerPanelEl.value.style.viewTransitionName = 'page-center';
-    } finally {
-      // Always restore names so a cancelled transition leaves no stale state.
-      cardEl.style.viewTransitionName = '';
-      if (centerPanelEl.value) centerPanelEl.value.style.viewTransitionName = 'page-center';
-    }
-  });
-  transition.finished.catch(() => {
-    if (centerPanelEl.value) centerPanelEl.value.style.viewTransitionName = 'page-center';
-  });
+  navigateToNode(relation.targetId, evt.currentTarget);
 }
 
 // ── Export ────────────────────────────────────────────────────────────
