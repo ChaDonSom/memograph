@@ -598,10 +598,7 @@ body {
   z-index: 1;
 }
 
-.rel-connector-hotspot.active {
-  z-index: 20;
-}
-
+.rel-connector-hotspot.active,
 .rel-connector-hotspot--active {
   z-index: 20;
 }
