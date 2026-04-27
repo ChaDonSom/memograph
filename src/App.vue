@@ -480,7 +480,9 @@ const RELATION_CARD_TRANSITION_PREFIX = 'rel-card-';
 const REMOTE_CONNECTOR_LABEL_X_OFFSET = 8;
 const REMOTE_CONNECTOR_MIN_ARC = 46;
 const REMOTE_CONNECTOR_LANE_GAP = 9;
+const REMOTE_CONNECTOR_MAX_LANES = 5;
 const REMOTE_CONNECTOR_LABEL_Y_OFFSET = -8;
+const DJB2_HASH_INITIAL = 5381;
 
 const stored = loadGraph();
 const nodes = ref(stored.nodes);
@@ -661,7 +663,7 @@ function remoteHopAttenuation(hop) {
 }
 
 function stableTransitionToken(value) {
-  let hash = 5381;
+  let hash = DJB2_HASH_INITIAL;
   for (let i = 0; i < value.length; i++) {
     hash = ((hash << 5) + hash) ^ value.charCodeAt(i);
   }
@@ -874,7 +876,7 @@ function connectorPath(startX, startY, endX, endY) {
 }
 
 function remoteConnectorLaneX(isIncoming, endpointX, centerRect, canvasRect, laneIndex) {
-  const laneOffset = (laneIndex % 5 - 2) * REMOTE_CONNECTOR_LANE_GAP;
+  const laneOffset = (laneIndex % REMOTE_CONNECTOR_MAX_LANES - 2) * REMOTE_CONNECTOR_LANE_GAP;
   if (isIncoming) {
     const whitespaceEdge = centerRect.left - canvasRect.left - REMOTE_CONNECTOR_LABEL_X_OFFSET;
     return Math.min(whitespaceEdge, endpointX + REMOTE_CONNECTOR_MIN_ARC + laneOffset);
@@ -1157,7 +1159,7 @@ function relationCardForTarget(targetId, sourceRelation = null) {
   const sourceKey = sourceRelation ? relationTransitionKey(sourceRelation) : '';
   const relations = visibleRelations();
   const relation = relations.find(r =>
-    sourceKey ? relationTransitionKey(r) === sourceKey && r.targetId === targetId : false
+    sourceKey && relationTransitionKey(r) === sourceKey && r.targetId === targetId
   ) || relations.find(r => r.targetId === targetId);
   return relation ? relationCardEls.get(relation.edgeId) : null;
 }
