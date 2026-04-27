@@ -457,12 +457,12 @@ const CONNECTOR_MAX_CURVE = 120;
 const CONNECTOR_MIN_CURVE = 48;
 const CONNECTOR_VERTICAL_CURVE_RATIO = 0.35;
 const CONNECTOR_HORIZONTAL_CURVE_RATIO = 0.45;
-const REMOTE_HOP_DECAY = 0.62;
+const REMOTE_HOP_MULTIPLIER = 0.62;
 const REMOTE_MIN_SCORE = 4;
 const REMOTE_MAX_CARDS_PER_SIDE = 36;
 const CARD_SCORE_LOW = 12;
 const CARD_SCORE_HIGH = 30;
-const remoteHopDecayCache = new Map([[1, 1]]);
+const remoteHopMultiplierCache = new Map([[1, 1]]);
 
 const stored = loadGraph();
 const nodes = ref(stored.nodes);
@@ -625,10 +625,14 @@ function relationCardStyle(relation) {
 }
 
 function remoteHopAttenuation(hop) {
-  if (!remoteHopDecayCache.has(hop)) {
-    remoteHopDecayCache.set(hop, REMOTE_HOP_DECAY * remoteHopAttenuation(hop - 1));
+  if (!remoteHopMultiplierCache.has(hop)) {
+    let multiplier = 1;
+    for (let step = 1; step < hop; step++) {
+      multiplier *= REMOTE_HOP_MULTIPLIER;
+    }
+    remoteHopMultiplierCache.set(hop, multiplier);
   }
-  return remoteHopDecayCache.get(hop);
+  return remoteHopMultiplierCache.get(hop);
 }
 
 function findNode(id) {
@@ -734,10 +738,16 @@ function remoteRelationCandidate(edge, node, parent, hop, side) {
   };
 }
 
+function isBetterRemoteCandidate(candidate, currentCandidate) {
+  return !currentCandidate
+    || candidate.score > currentCandidate.score
+    || (candidate.score === currentCandidate.score && candidate.hop < currentCandidate.hop);
+}
+
 function discoverRemoteRelations(side, directRelations) {
   if (!currentId.value) return [];
-  const allDirectIds = new Set(rankedRelations.value.map(r => r.targetId));
-  const seenNodeIds = new Set([currentId.value, ...allDirectIds]);
+  const blockedNodeIds = new Set([currentId.value, ...rankedRelations.value.map(r => r.targetId)]);
+  const queuedNodeIds = new Set(blockedNodeIds);
   const visibleByNodeId = new Map();
   const queue = directRelations.map(relation => ({ relation, hop: 1 }));
 
@@ -750,20 +760,22 @@ function discoverRemoteRelations(side, directRelations) {
 
     for (const edge of nextEdges) {
       const targetId = side === 'incoming' ? edge.fromId : edge.toId;
-      if (seenNodeIds.has(targetId)) continue;
+      if (blockedNodeIds.has(targetId)) continue;
       const node = findNode(targetId);
       if (!node) continue;
 
-      seenNodeIds.add(targetId);
       const candidate = remoteRelationCandidate(edge, node, parent, nextHop, side);
-      queue.push({ relation: candidate, hop: nextHop });
-      if (candidate.score >= REMOTE_MIN_SCORE) {
+      if (isBetterRemoteCandidate(candidate, visibleByNodeId.get(node.id)) && candidate.score >= REMOTE_MIN_SCORE) {
         visibleByNodeId.set(node.id, candidate);
       }
+      if (queuedNodeIds.has(targetId)) continue;
+      queuedNodeIds.add(targetId);
+      queue.push({ relation: candidate, hop: nextHop });
     }
   }
 
   return [...visibleByNodeId.values()]
+    // Equal scores favor closer pages because their relationship chain is easier to scan.
     .sort((a, b) => b.score - a.score || a.hop - b.hop)
     .slice(0, REMOTE_MAX_CARDS_PER_SIDE)
     .map(relation => ({
