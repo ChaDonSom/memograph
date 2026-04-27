@@ -1235,7 +1235,6 @@ function parseImportedGraph(raw) {
     nodeIds.add(node.id);
     importedNodes.push({
       ...node,
-      id: node.id,
       title: importStringOr(node.title),
       bodyDelta: importStringOr(node.bodyDelta),
       bodyHtml: importStringOr(node.bodyHtml),
@@ -1267,9 +1266,6 @@ function parseImportedGraph(raw) {
     edgeIds.add(edge.id);
     importedEdges.push({
       ...edge,
-      id: edge.id,
-      fromId: edge.fromId,
-      toId: edge.toId,
       desc: importStringOr(edge.desc),
       descDelta: importStringOr(edge.descDelta),
       descHtml: importStringOr(edge.descHtml),
