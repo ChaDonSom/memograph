@@ -811,7 +811,7 @@ function remoteRelationCandidate(edge, node, parent, hop, side) {
   };
 }
 
-function hydrateRemoteRelation(relation) {
+function hydrateRemoteRelationWithDetails(relation) {
   const edge = findEdge(relation.graphEdgeId);
   const node = findNode(relation.targetId);
   if (!edge || !node) return null;
@@ -845,6 +845,7 @@ function discoverRemoteRelations(side, directRelations) {
   const directEdgeIds = new Set(directRelations.map(r => r.edgeId));
   const queue = directRelations.map(relation => ({ relation, hop: 1 }));
 
+  // The traversal queue grows as low-scoring candidates are visited so strong descendants can still surface.
   for (let i = 0; i < queue.length; i++) {
     const { relation: parent, hop } = queue[i];
     const nextHop = hop + 1;
@@ -873,7 +874,7 @@ function discoverRemoteRelations(side, directRelations) {
   }
 
   const selectedRelations = [...visibleByNodeId.values()]
-    // Equal scores favor closer pages because their relationship chain is easier to scan.
+    // This first ordering selects the strongest remote cards before required ancestors are added below.
     .sort((a, b) => b.score - a.score || a.hop - b.hop)
     .slice(0, REMOTE_MAX_CARDS_PER_SIDE);
 
@@ -889,8 +890,9 @@ function discoverRemoteRelations(side, directRelations) {
   }
 
   return [...selectedByEdgeId.values()]
+    // The final ordering includes any low-score ancestors needed to keep visible chains connected.
     .sort((a, b) => b.score - a.score || a.hop - b.hop)
-    .map(hydrateRemoteRelation)
+    .map(hydrateRemoteRelationWithDetails)
     .filter(Boolean);
 }
 
@@ -956,8 +958,12 @@ function spacedEndpointY(rect, index, count, canvasTop) {
 
 function registerEndpoint(endpointGroups, key, rect, baseY) {
   const endpoint = { rect, baseY, y: baseY };
-  if (!endpointGroups.has(key)) endpointGroups.set(key, []);
-  endpointGroups.get(key).push(endpoint);
+  let endpoints = endpointGroups.get(key);
+  if (!endpoints) {
+    endpoints = [];
+    endpointGroups.set(key, endpoints);
+  }
+  endpoints.push(endpoint);
   return endpoint;
 }
 
