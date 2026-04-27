@@ -303,6 +303,7 @@ const MS_PER_DAY = 86_400_000;
 const RELATION_CARD_FIRST_LINE_LENGTH = 72;
 // Truncation length for relationship names shown on connector labels.
 const CONNECTOR_LABEL_MAX_LENGTH = 54;
+const ARIA_LABEL_DETAILS_MAX_LENGTH = 140;
 const CONNECTOR_CENTER_TARGET_RATIO = 0.42;
 const CONNECTOR_MIN_TARGET_OFFSET = 48;
 // Keep embedded data images below a conservative URL budget because each page
@@ -694,14 +695,13 @@ function richTextToPlainText(html = '') {
 }
 
 function richTextFirstLine(html = '') {
-  const template = document.createElement('template');
-  template.innerHTML = html;
-  const blocks = template.content.querySelectorAll('p, h1, h2, h3, li, blockquote, pre, div');
+  const doc = new DOMParser().parseFromString(html, 'text/html');
+  const blocks = doc.body.querySelectorAll('p, h1, h2, h3, li, blockquote, pre, div');
   for (const block of blocks) {
     const text = (block.textContent || '').replace(/\s+/g, ' ').trim();
     if (text) return text;
   }
-  return firstNormalizedLine(template.content.textContent || '');
+  return firstNormalizedLine(doc.body.textContent || '');
 }
 
 function decodeHtmlEntities(text = '') {
@@ -742,7 +742,7 @@ function extractPageDetails(node) {
 }
 
 function relationAriaLabel(relation) {
-  const details = truncateText(decodeHtmlEntities(relation.pageDetails), 140);
+  const details = truncateText(decodeHtmlEntities(relation.pageDetails), ARIA_LABEL_DETAILS_MAX_LENGTH);
   return `${relation.dir} ${relation.title}. ${details}. Press Enter or Space to open related page.`;
 }
 
