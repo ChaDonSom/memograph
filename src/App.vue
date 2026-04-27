@@ -465,9 +465,11 @@ const CONNECTOR_MAX_CURVE = 120;
 const CONNECTOR_MIN_CURVE = 48;
 const CONNECTOR_VERTICAL_CURVE_RATIO = 0.35;
 const CONNECTOR_HORIZONTAL_CURVE_RATIO = 0.45;
+// Each remote hop retains 62% of its P score, keeping close pages favored while allowing strong distant pages through.
 const REMOTE_HOP_MULTIPLIER = 0.62;
 const REMOTE_MIN_SCORE = 4;
 const REMOTE_MAX_CARDS_PER_SIDE = 36;
+// Card sizing treats low P scores as compact and high P scores as prominent.
 const CARD_SCORE_LOW = 12;
 const CARD_SCORE_HIGH = 30;
 const MAX_HOP_INDENT_LEVEL = 5;
@@ -628,9 +630,10 @@ function relationCardSizeClass(relation) {
 
 function relationCardStyle(relation) {
   const ratio = importanceRatio(relation.score);
+  const hopIndentLevel = Math.max(0, Math.min((relation.hop || 1) - 1, MAX_HOP_INDENT_LEVEL));
   return {
     '--rel-importance': ratio.toFixed(3),
-    '--rel-hop-indent': `${Math.min((relation.hop || 1) - 1, MAX_HOP_INDENT_LEVEL) * HOP_INDENT_PX}px`,
+    '--rel-hop-indent': `${hopIndentLevel * HOP_INDENT_PX}px`,
   };
 }
 
@@ -781,8 +784,10 @@ function discoverRemoteRelations(side, directRelations) {
 
       // Keep low-scoring pages in the traversal queue so stronger descendants can still surface.
       const candidate = remoteRelationCandidate(edge, node, parent, nextHop, side);
-      if (isBetterRemoteCandidate(candidate, visibleByNodeId.get(node.id)) && candidate.score >= REMOTE_MIN_SCORE) {
-        visibleByNodeId.set(node.id, candidate);
+      if (isBetterRemoteCandidate(candidate, visibleByNodeId.get(node.id))) {
+        if (candidate.score >= REMOTE_MIN_SCORE) {
+          visibleByNodeId.set(node.id, candidate);
+        }
       }
       if (queuedNodeIds.has(targetId)) continue;
       queuedNodeIds.add(targetId);
