@@ -534,6 +534,12 @@ body {
 
 .rel-connector marker path { fill: var(--accent); }
 
+.rel-connector--hop2 path {
+  stroke: rgba(129, 140, 248, .32);
+  stroke-dasharray: 4 4;
+  stroke-width: 1.2;
+}
+
 .rel-connector-labels {
   position: absolute;
   inset: 0;
@@ -942,4 +948,93 @@ body {
   .page-title {
     font-size: 25px;
   }
+}
+
+.img-resize-bar {
+  position: absolute;
+  z-index: 10;
+  display: flex;
+  gap: 4px;
+  background: var(--surface2);
+  border: 1px solid var(--border2);
+  border-radius: 6px;
+  padding: 3px 5px;
+  box-shadow: 0 4px 14px rgba(0,0,0,.45);
+  pointer-events: auto;
+}
+.img-resize-bar button {
+  padding: 3px 8px;
+  background: var(--surface3);
+  border: 1px solid var(--border);
+  color: var(--muted);
+  border-radius: 4px;
+  font-size: 11px;
+  font-family: inherit;
+  cursor: pointer;
+  transition: all .1s;
+}
+.img-resize-bar button:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: var(--accent-d);
+}
+.sidebar {
+  transition: width .2s ease, min-width .2s ease;
+}
+.sidebar.collapsed {
+  width: 40px;
+  min-width: 40px;
+  overflow: hidden;
+}
+.sidebar.collapsed .s-search,
+.sidebar.collapsed .s-list,
+.sidebar.collapsed .s-foot,
+.sidebar.collapsed .brand,
+.sidebar.collapsed .n-count {
+  display: none;
+}
+.sidebar.collapsed .s-head {
+  justify-content: center;
+  padding: 10px 0;
+}
+.btn-collapse-sidebar {
+  font-size: 16px;
+  line-height: 1;
+  padding: 4px 8px;
+}
+.resource-panel {
+  view-transition-name: none;
+}
+::view-transition-old(page-center) {
+  animation: 220ms ease both vt-fade-out;
+}
+::view-transition-new(page-center) {
+  animation: 220ms ease both vt-fade-in;
+}
+@keyframes vt-fade-out {
+  from { opacity: 1; transform: scale(1); }
+  to   { opacity: 0; transform: scale(0.97); }
+}
+@keyframes vt-fade-in {
+  from { opacity: 0; transform: scale(1.02); }
+  to   { opacity: 1; transform: scale(1); }
+}
+.rel-card--hop2 {
+  font-size: 0.6em;
+  min-height: unset;
+  max-height: 120px;
+  opacity: 0.75;
+  border-style: dashed;
+}
+.rel-card--hop2:hover {
+  opacity: 1;
+}
+.rel-hop-label {
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+  color: var(--dim);
+  padding: 2px 0;
+  opacity: 0.7;
 }
