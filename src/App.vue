@@ -46,76 +46,131 @@
   <!-- ── Main: editor ─────────────────────────── -->
   <div class="main" v-if="current">
     <div class="main-scroll">
+      <div class="relationship-canvas" ref="relationshipCanvasEl">
+        <svg
+          class="rel-connectors"
+          v-show="connectorLines.length"
+          :width="connectorCanvas.width"
+          :height="connectorCanvas.height"
+          :viewBox="`0 0 ${connectorCanvas.width} ${connectorCanvas.height}`"
+          aria-hidden="true"
+        >
+          <defs>
+            <marker id="rel-arrowhead" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto" markerUnits="strokeWidth">
+              <path d="M 0 0 L 8 4 L 0 8 z" />
+            </marker>
+          </defs>
+          <g v-for="line in connectorLines" :key="line.edgeId" class="rel-connector">
+            <path :d="line.path" marker-end="url(#rel-arrowhead)" />
+            <text :x="line.labelX" :y="line.labelY">{{ line.label }}</text>
+          </g>
+        </svg>
 
-      <!-- Title -->
-      <div>
-        <input
-          class="page-title"
-          v-model="current.title"
-          placeholder="Page title…"
-          @input="queueSave"
-        />
-        <div class="page-meta">
-          <span>Edited {{ timeAgo(current.updatedAt) }}</span>
-          <span>{{ current.visits || 0 }} visit{{ current.visits !== 1 ? 's' : '' }}</span>
-        </div>
-      </div>
-
-      <!-- Quill editor -->
-      <div class="editor-wrap">
-        <div id="qeditor"></div>
-      </div>
-
-      <!-- Page actions -->
-      <div class="page-actions">
-        <button class="btn btn-danger" @click="deletePage">Delete page</button>
-      </div>
-
-      <!-- Relations -->
-      <div class="rel-section">
-        <div class="rel-head">
-          <span class="rel-label">Relations</span>
-          <button class="btn-add-rel" @click="openModal">+ Add relation</button>
-        </div>
-
-        <div class="rel-grid" v-if="ranked.length">
-          <div
-            v-for="r in ranked"
-            :key="r.edgeId"
-            class="rel-card"
-            @click="loadNode(r.targetId)"
-            @mouseenter="showPrev($event, r.targetId)"
-            @mouseleave="hidePrev"
-          >
-            <div class="rel-dir">{{ r.dir }}</div>
-            <!-- Incoming: other page is the subject, its title leads -->
-            <template v-if="r.dir.startsWith('←')">
+        <section class="relation-side relation-side--incoming" aria-label="Incoming relationships">
+          <div class="relation-side-head">
+            <span class="rel-label">Incoming</span>
+            <span class="rel-count">{{ incomingRanked.length }}</span>
+          </div>
+          <div class="rel-column" v-if="incomingRanked.length">
+            <div
+              v-for="r in incomingRanked"
+              :key="r.edgeId"
+              :ref="el => setRelationCardRef(r.edgeId, el)"
+              class="rel-card rel-card--side"
+              role="button"
+              tabindex="0"
+              @click="loadNode(r.targetId)"
+              @keydown.enter.prevent="loadNode(r.targetId)"
+              @keydown.space.prevent="loadNode(r.targetId)"
+              @mouseenter="showRelationPreview($event, r)"
+              @mouseleave="hidePrev"
+              @focusin="showRelationPreview($event, r)"
+              @focusout="hidePrev"
+            >
+              <div class="rel-dir">{{ r.dir }}</div>
               <div class="rel-title">{{ r.title }}</div>
-              <div class="rel-rich" v-if="r.relationHtml" v-html="r.relationHtml"></div>
-              <template v-else>
-                <div class="rel-label-text" v-if="r.label">{{ r.label }}</div>
-                <div class="rel-detail" v-if="r.detail">{{ r.detail }}</div>
-              </template>
-            </template>
-            <!-- Outgoing: relation label is the predicate, target title follows -->
-            <template v-else>
-              <div class="rel-rich" v-if="r.relationHtml" v-html="r.relationHtml"></div>
-              <div class="rel-label-text" v-else-if="r.label">{{ r.label }}</div>
-              <div class="rel-title">{{ r.title }}</div>
-              <div class="rel-detail" v-if="!r.relationHtml && r.detail">{{ r.detail }}</div>
-            </template>
-            <div class="rel-foot">
-              <span class="rel-score">P={{ r.score.toFixed(1) }}</span>
-              <button class="rel-del" @click.stop="dropEdge(r.edgeId)" title="Remove relation">✕</button>
+              <div class="rel-label-text rel-first-line">{{ r.firstLine }}</div>
+              <div class="rel-foot">
+                <span class="rel-score">P={{ r.score.toFixed(1) }}</span>
+                <button class="rel-preview-btn" @click.stop="showRelationPreview($event, r)" title="Preview relationship">ⓘ</button>
+                <button class="rel-del" @click.stop="dropEdge(r.edgeId)" title="Remove relation">✕</button>
+              </div>
             </div>
           </div>
-        </div>
+          <div class="rel-empty" v-else>No incoming relations.</div>
+        </section>
 
-        <div class="rel-empty" v-else>
-          No relations yet. Add one above to connect this page to another.
-        </div>
+        <section class="resource-panel" ref="centerPanelEl" aria-label="Current page">
+          <!-- Title -->
+          <div>
+            <input
+              class="page-title"
+              v-model="current.title"
+              placeholder="Page title…"
+              @input="queueSave"
+            />
+            <div class="page-meta">
+              <span>Edited {{ timeAgo(current.updatedAt) }}</span>
+              <span>{{ current.visits || 0 }} visit{{ current.visits !== 1 ? 's' : '' }}</span>
+            </div>
+          </div>
+
+          <!-- Quill editor -->
+          <div class="editor-wrap">
+            <div id="qeditor"></div>
+          </div>
+
+          <!-- Relations -->
+          <div class="rel-section">
+            <div class="rel-head">
+              <span class="rel-label">Relations</span>
+              <button class="btn-add-rel" @click="openModal">+ Add relation</button>
+            </div>
+            <div class="rel-empty" v-if="!rankedRelations.length">
+              No relations yet. Add one above to connect this page to another.
+            </div>
+          </div>
+
+          <!-- Page actions -->
+          <div class="page-actions">
+            <button class="btn btn-danger" @click="deletePage">Delete page</button>
+          </div>
+        </section>
+
+        <section class="relation-side relation-side--outgoing" aria-label="Outgoing relationships">
+          <div class="relation-side-head">
+            <span class="rel-label">Outgoing</span>
+            <span class="rel-count">{{ outgoingRanked.length }}</span>
+          </div>
+          <div class="rel-column" v-if="outgoingRanked.length">
+            <div
+              v-for="r in outgoingRanked"
+              :key="r.edgeId"
+              :ref="el => setRelationCardRef(r.edgeId, el)"
+              class="rel-card rel-card--side"
+              role="button"
+              tabindex="0"
+              @click="loadNode(r.targetId)"
+              @keydown.enter.prevent="loadNode(r.targetId)"
+              @keydown.space.prevent="loadNode(r.targetId)"
+              @mouseenter="showRelationPreview($event, r)"
+              @mouseleave="hidePrev"
+              @focusin="showRelationPreview($event, r)"
+              @focusout="hidePrev"
+            >
+              <div class="rel-dir">{{ r.dir }}</div>
+              <div class="rel-label-text rel-first-line">{{ r.firstLine }}</div>
+              <div class="rel-title">{{ r.title }}</div>
+              <div class="rel-foot">
+                <span class="rel-score">P={{ r.score.toFixed(1) }}</span>
+                <button class="rel-preview-btn" @click.stop="showRelationPreview($event, r)" title="Preview relationship">ⓘ</button>
+                <button class="rel-del" @click.stop="dropEdge(r.edgeId)" title="Remove relation">✕</button>
+              </div>
+            </div>
+          </div>
+          <div class="rel-empty" v-else>No outgoing relations.</div>
+        </section>
       </div>
-
     </div>
   </div>
 
@@ -214,7 +269,7 @@
 </template>
 
 <script setup>
-import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue';
+import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue';
 import Quill from 'quill';
 import { loadGraph, saveGraph } from './services/graphRepository.js';
 
@@ -269,9 +324,16 @@ const currentId = ref(null);
 const search = ref('');
 const listOpen = ref(false);
 const sidebarEl = ref(null);
+const relationshipCanvasEl = ref(null);
+const centerPanelEl = ref(null);
+const connectorLines = ref([]);
+const connectorCanvas = reactive({ width: 0, height: 0 });
+const relationCardEls = new Map();
 let editor = null;
 let relEditor = null;
 let saveTimer = null;
+let connectorFrame = null;
+let connectorResizeObserver = null;
 
 const RICH_CONTENT_TOOLBAR = [
   ['bold', 'italic', 'underline', 'strike'],
@@ -574,23 +636,51 @@ function splitRelationDescription(desc = '') {
   };
 }
 
+function richTextToPlainText(html = '') {
+  const template = document.createElement('template');
+  template.innerHTML = html;
+  return (template.content.textContent || '').replace(/\s+/g, ' ').trim();
+}
+
+function escapeHtml(text = '') {
+  return text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
+}
+
+function truncateText(text = '', maxLength = 52) {
+  return text.length > maxLength ? `${text.slice(0, maxLength - 1).trimEnd()}…` : text;
+}
+
+function relationFirstLine(relationHtml, desc = '') {
+  const richText = relationHtml ? richTextToPlainText(relationHtml) : '';
+  const plainText = richText || desc.replace(/\r\n/g, '\n').split('\n')[0]?.trim() || '';
+  return truncateText(plainText || 'Relationship', 72);
+}
+
 function findNode(id) {
   return nodes.value.find(n => n.id === id) ?? null;
 }
 
-const ranked = computed(() => {
+const rankedRelations = computed(() => {
   if (!currentId.value) return [];
   const cid = currentId.value;
   const out = [];
   for (const e of edges.value) {
     let tid = null;
     let dir = '';
+    let side = '';
     if (e.fromId === cid) {
       tid = e.toId;
       dir = '→ outgoing';
+      side = 'outgoing';
     } else if (e.toId === cid) {
       tid = e.fromId;
       dir = '← incoming';
+      side = 'incoming';
     }
     if (!tid) continue;
     const t = findNode(tid);
@@ -609,11 +699,88 @@ const ranked = computed(() => {
       detail,
       relationHtml,
       dir,
+      side,
+      firstLine: relationFirstLine(relationHtml, e.desc),
       score: pScore(e, t),
     });
   }
   return out.sort((a, b) => b.score - a.score);
 });
+
+const incomingRanked = computed(() =>
+  rankedRelations.value.filter(r => r.side === 'incoming')
+);
+
+const outgoingRanked = computed(() =>
+  rankedRelations.value.filter(r => r.side === 'outgoing')
+);
+
+function setRelationCardRef(edgeId, el) {
+  if (el) {
+    relationCardEls.set(edgeId, el);
+  } else {
+    relationCardEls.delete(edgeId);
+  }
+}
+
+function connectorPath(x1, y1, x2, y2, side) {
+  const curve = Math.min(120, Math.max(48, Math.abs(x2 - x1) * 0.45));
+  if (side === 'incoming') {
+    return `M ${x1} ${y1} C ${x1 + curve} ${y1}, ${x2 - curve} ${y2}, ${x2} ${y2}`;
+  }
+  return `M ${x1} ${y1} C ${x1 - curve} ${y1}, ${x2 + curve} ${y2}, ${x2} ${y2}`;
+}
+
+function updateRelationConnectors() {
+  const canvas = relationshipCanvasEl.value;
+  const center = centerPanelEl.value;
+  if (!canvas || !center || window.matchMedia('(max-width: 1100px)').matches) {
+    connectorLines.value = [];
+    return;
+  }
+
+  const canvasRect = canvas.getBoundingClientRect();
+  const centerRect = center.getBoundingClientRect();
+  connectorCanvas.width = Math.round(canvasRect.width);
+  connectorCanvas.height = Math.round(canvasRect.height);
+
+  const nextLines = [];
+  for (const r of rankedRelations.value) {
+    const card = relationCardEls.get(r.edgeId);
+    if (!card) continue;
+
+    const cardRect = card.getBoundingClientRect();
+    const y1 = cardRect.top - canvasRect.top + cardRect.height / 2;
+    const y2 = centerRect.top - canvasRect.top + Math.min(centerRect.height * 0.42, Math.max(48, y1 - (centerRect.top - canvasRect.top)));
+    const isIncoming = r.side === 'incoming';
+    const x1 = (isIncoming ? cardRect.right : cardRect.left) - canvasRect.left;
+    const x2 = (isIncoming ? centerRect.left : centerRect.right) - canvasRect.left;
+
+    nextLines.push({
+      edgeId: r.edgeId,
+      path: connectorPath(x1, y1, x2, y2, r.side),
+      label: truncateText(r.firstLine, 34),
+      labelX: (x1 + x2) / 2,
+      labelY: (y1 + y2) / 2 - 8,
+    });
+  }
+
+  connectorLines.value = nextLines;
+}
+
+function scheduleConnectorUpdate() {
+  if (connectorFrame) cancelAnimationFrame(connectorFrame);
+  connectorFrame = requestAnimationFrame(() => {
+    connectorFrame = null;
+    updateRelationConnectors();
+  });
+}
+
+function observeConnectorTargets() {
+  if (!connectorResizeObserver) return;
+  if (relationshipCanvasEl.value) connectorResizeObserver.observe(relationshipCanvasEl.value);
+  if (centerPanelEl.value) connectorResizeObserver.observe(centerPanelEl.value);
+}
 
 // ── Quill ─────────────────────────────────────────────────────────────
 function initEditor() {
@@ -687,6 +854,8 @@ async function loadNode(id) {
   currentId.value = id;
   await nextTick();
   initEditor();
+  observeConnectorTargets();
+  scheduleConnectorUpdate();
 }
 
 function createGraphNode(title = '') {
@@ -790,6 +959,18 @@ function showPrev(evt, tid) {
   prev.on = true;
 }
 
+function showRelationPreview(evt, relation) {
+  const rect = evt.currentTarget.getBoundingClientRect();
+  const x = Math.min(rect.right + 12, window.innerWidth - PREVIEW_WIDTH - PREVIEW_GUTTER);
+  const y = Math.max(8, Math.min(rect.top, window.innerHeight - PREVIEW_HEIGHT_WITH_GUTTER));
+  const fallbackText = [relation.label, relation.detail].filter(Boolean).join('\n\n') || relation.firstLine;
+  prev.title = `${relation.dir}: ${relation.title}`;
+  prev.html = relation.relationHtml || `<p>${escapeHtml(fallbackText || 'No relationship description.')}</p>`;
+  prev.x = x;
+  prev.y = y;
+  prev.on = true;
+}
+
 function hidePrev() { prev.on = false; }
 
 // ── Export ────────────────────────────────────────────────────────────
@@ -818,12 +999,28 @@ watch(listOpen, (open, _oldValue, onCleanup) => {
   onCleanup(() => document.removeEventListener('pointerdown', onPointerDown));
 });
 
+watch(rankedRelations, async () => {
+  await nextTick();
+  scheduleConnectorUpdate();
+}, { flush: 'post' });
+
 // ── Mount ─────────────────────────────────────────────────────────────
 onMounted(async () => {
+  window.addEventListener('resize', scheduleConnectorUpdate);
+  connectorResizeObserver = new ResizeObserver(scheduleConnectorUpdate);
+  observeConnectorTargets();
+
   if (nodes.value.length) {
     const latest = [...nodes.value].sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0))[0];
     await loadNode(latest.id);
   }
+  scheduleConnectorUpdate();
+});
+
+onBeforeUnmount(() => {
+  window.removeEventListener('resize', scheduleConnectorUpdate);
+  connectorResizeObserver?.disconnect();
+  if (connectorFrame) cancelAnimationFrame(connectorFrame);
 });
 
 </script>
