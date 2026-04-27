@@ -123,7 +123,11 @@
         <section class="relation-side relation-side--incoming" aria-label="Incoming relationships">
           <div class="relation-side-head">
             <span class="rel-label">Incoming</span>
-            <span class="rel-count" title="Direct / visible total">{{ incomingRanked.length }} / {{ incomingRanked.length + remoteIncoming.length }}</span>
+            <span
+              class="rel-count"
+              title="Direct / visible total"
+              :aria-label="relationCountLabel('incoming', incomingRanked.length, remoteIncoming.length)"
+            >{{ incomingRanked.length }} / {{ incomingRanked.length + remoteIncoming.length }}</span>
           </div>
           <div class="rel-column" v-if="incomingRanked.length">
             <div
@@ -245,7 +249,11 @@
         <section class="relation-side relation-side--outgoing" aria-label="Outgoing relationships">
           <div class="relation-side-head">
             <span class="rel-label">Outgoing</span>
-            <span class="rel-count" title="Direct / visible total">{{ outgoingRanked.length }} / {{ outgoingRanked.length + remoteOutgoing.length }}</span>
+            <span
+              class="rel-count"
+              title="Direct / visible total"
+              :aria-label="relationCountLabel('outgoing', outgoingRanked.length, remoteOutgoing.length)"
+            >{{ outgoingRanked.length }} / {{ outgoingRanked.length + remoteOutgoing.length }}</span>
           </div>
           <div class="rel-column" v-if="outgoingRanked.length">
             <div
@@ -462,6 +470,8 @@ const REMOTE_MIN_SCORE = 4;
 const REMOTE_MAX_CARDS_PER_SIDE = 36;
 const CARD_SCORE_LOW = 12;
 const CARD_SCORE_HIGH = 30;
+const MAX_HOP_INDENT_LEVEL = 5;
+const HOP_INDENT_PX = 8;
 const remoteHopMultiplierCache = new Map([[1, 1]]);
 
 const stored = loadGraph();
@@ -620,8 +630,13 @@ function relationCardStyle(relation) {
   const ratio = importanceRatio(relation.score);
   return {
     '--rel-importance': ratio.toFixed(3),
-    '--rel-hop-indent': `${Math.min((relation.hop || 1) - 1, 5) * 8}px`,
+    '--rel-hop-indent': `${Math.min((relation.hop || 1) - 1, MAX_HOP_INDENT_LEVEL) * HOP_INDENT_PX}px`,
   };
+}
+
+function relationCountLabel(side, directCount, remoteCount) {
+  const total = directCount + remoteCount;
+  return `${directCount} direct ${side} relation${directCount === 1 ? '' : 's'}, ${total} visible total including further related pages`;
 }
 
 function remoteHopAttenuation(hop) {
@@ -764,6 +779,7 @@ function discoverRemoteRelations(side, directRelations) {
       const node = findNode(targetId);
       if (!node) continue;
 
+      // Keep low-scoring pages in the traversal queue so stronger descendants can still surface.
       const candidate = remoteRelationCandidate(edge, node, parent, nextHop, side);
       if (isBetterRemoteCandidate(candidate, visibleByNodeId.get(node.id)) && candidate.score >= REMOTE_MIN_SCORE) {
         visibleByNodeId.set(node.id, candidate);
