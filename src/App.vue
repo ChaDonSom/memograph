@@ -1157,7 +1157,7 @@ function relationCardForTarget(targetId, sourceRelation = null) {
   const sourceKey = sourceRelation ? relationTransitionKey(sourceRelation) : '';
   const relations = visibleRelations();
   const relation = relations.find(r =>
-    sourceKey && relationTransitionKey(r) === sourceKey && r.targetId === targetId
+    sourceKey ? relationTransitionKey(r) === sourceKey && r.targetId === targetId : false
   ) || relations.find(r => r.targetId === targetId);
   return relation ? relationCardEls.get(relation.edgeId) : null;
 }
@@ -1340,6 +1340,7 @@ function closeModal() {
 function selectModalTarget(node) {
   modal.targetId = node.id;
   modal.targetSearch = node.title || '';
+  if (modal.editFromId) modal.editToId = node.id;
 }
 
 function createModalTarget() {
@@ -1355,7 +1356,7 @@ function saveRel() {
   }
   const cid = currentId.value;
   const from = modal.editFromId || (modal.dir === 'in' ? modal.targetId : cid);
-  const to = modal.editFromId ? modal.targetId : (modal.dir === 'in' ? cid : modal.targetId);
+  const to = modal.editFromId ? modal.editToId : (modal.dir === 'in' ? cid : modal.targetId);
   const desc = relEditor.getText().trim();
   const descDelta = JSON.stringify(sanitizeRichDelta(relEditor.getContents()));
   const descHtml = sanitizeRichHtml(normalizeEditorHtml(relEditor.root.innerHTML));
