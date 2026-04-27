@@ -79,7 +79,7 @@
               class="rel-card rel-card--side"
               role="button"
               tabindex="0"
-              :aria-label="`${r.dir} ${r.title}. ${r.firstLine}. Press Space to preview relationship; press Enter to open related page.`"
+              :aria-label="r.ariaLabel"
               @click="handleRelationCardClick($event, r)"
               @keydown.enter.prevent="loadNode(r.targetId)"
               @keydown.space.prevent="showRelationPreview($event, r)"
@@ -150,7 +150,7 @@
               class="rel-card rel-card--side"
               role="button"
               tabindex="0"
-              :aria-label="`${r.dir} ${r.title}. ${r.firstLine}. Press Space to preview relationship; press Enter to open related page.`"
+              :aria-label="r.ariaLabel"
               @click="handleRelationCardClick($event, r)"
               @keydown.enter.prevent="loadNode(r.targetId)"
               @keydown.space.prevent="showRelationPreview($event, r)"
@@ -646,6 +646,12 @@ function richTextToPlainText(html = '') {
   return (template.content.textContent || '').replace(/\s+/g, ' ').trim();
 }
 
+function decodeHtmlEntities(text = '') {
+  const textarea = document.createElement('textarea');
+  textarea.innerHTML = text;
+  return textarea.value;
+}
+
 function escapeHtml(text = '') {
   return text
     .replace(/&/g, '&amp;')
@@ -656,13 +662,18 @@ function escapeHtml(text = '') {
 }
 
 function truncateText(text = '', maxLength) {
-  return text.length >= maxLength ? `${text.slice(0, maxLength - 1).trimEnd()}…` : text;
+  return text.length > maxLength ? `${text.slice(0, maxLength - 1).trimEnd()}…` : text;
 }
 
 function extractRelationPreview(relationHtml, desc = '') {
   const richText = relationHtml ? richTextToPlainText(relationHtml) : '';
   const plainText = richText || desc.replace(/\r\n/g, '\n').split('\n')[0].trim() || '';
   return truncateText(plainText || 'Relationship', RELATION_CARD_FIRST_LINE_LENGTH);
+}
+
+function relationAriaLabel(relation) {
+  const preview = decodeHtmlEntities(relation.firstLine);
+  return `${relation.dir} ${relation.title}. ${preview}. Press Space to preview relationship; press Enter to open related page.`;
 }
 
 function findNode(id) {
@@ -695,7 +706,7 @@ const rankedRelations = computed(() => {
     if (!relationHtml) {
       ({ label, detail } = splitRelationDescription(e.desc));
     }
-    out.push({
+    const relation = {
       edgeId: e.id,
       targetId: tid,
       title: t.title || '(untitled)',
@@ -706,7 +717,9 @@ const rankedRelations = computed(() => {
       side,
       firstLine: extractRelationPreview(relationHtml, e.desc),
       score: pScore(e, t),
-    });
+    };
+    relation.ariaLabel = relationAriaLabel(relation);
+    out.push(relation);
   }
   return out.sort((a, b) => b.score - a.score);
 });
