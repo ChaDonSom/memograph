@@ -79,6 +79,7 @@
               class="rel-card rel-card--side"
               role="button"
               tabindex="0"
+              :aria-label="`${r.dir} ${r.title}. ${r.firstLine}. Press Space to preview relationship; press Enter to open related page.`"
               @click="handleRelationCardClick($event, r)"
               @keydown.enter.prevent="loadNode(r.targetId)"
               @keydown.space.prevent="showRelationPreview($event, r)"
@@ -149,6 +150,7 @@
               class="rel-card rel-card--side"
               role="button"
               tabindex="0"
+              :aria-label="`${r.dir} ${r.title}. ${r.firstLine}. Press Space to preview relationship; press Enter to open related page.`"
               @click="handleRelationCardClick($event, r)"
               @keydown.enter.prevent="loadNode(r.targetId)"
               @keydown.space.prevent="showRelationPreview($event, r)"
@@ -367,7 +369,7 @@ const modal = reactive({
   dir: 'out',
   w: DEFAULT_EDGE_WEIGHT,
 });
-const prev = reactive({ on: false, title: '', html: '', x: 0, y: 0 });
+const prev = reactive({ on: false, edgeId: '', title: '', html: '', x: 0, y: 0 });
 
 // ── Derived ───────────────────────────────────────────────────────────
 const current = computed(() =>
@@ -654,7 +656,7 @@ function escapeHtml(text = '') {
 }
 
 function truncateText(text = '', maxLength) {
-  return text.length > maxLength ? `${text.slice(0, maxLength - 1).trimEnd()}…` : text;
+  return text.length >= maxLength ? `${text.slice(0, maxLength - 1).trimEnd()}…` : text;
 }
 
 function extractRelationPreview(relationHtml, desc = '') {
@@ -725,12 +727,12 @@ function setRelationCardRef(edgeId, el) {
   }
 }
 
-function connectorPath(x1, y1, x2, y2, relationSide) {
-  const curve = Math.min(120, Math.max(48, Math.abs(x2 - x1) * 0.45));
+function connectorPath(startX, startY, endX, endY, relationSide) {
+  const curve = Math.min(120, Math.max(48, Math.abs(endX - startX) * 0.45));
   if (relationSide === 'incoming') {
-    return `M ${x1} ${y1} C ${x1 + curve} ${y1}, ${x2 - curve} ${y2}, ${x2} ${y2}`;
+    return `M ${startX} ${startY} C ${startX + curve} ${startY}, ${endX - curve} ${endY}, ${endX} ${endY}`;
   }
-  return `M ${x1} ${y1} C ${x1 - curve} ${y1}, ${x2 + curve} ${y2}, ${x2} ${y2}`;
+  return `M ${startX} ${startY} C ${startX - curve} ${startY}, ${endX + curve} ${endY}, ${endX} ${endY}`;
 }
 
 function connectorCenterVerticalOffset(centerHeight, cardMidpointY, centerTop) {
@@ -962,6 +964,7 @@ function showPrev(evt, tid) {
   const rect = evt.currentTarget.getBoundingClientRect();
   const x = Math.min(rect.right + 12, window.innerWidth - PREVIEW_WIDTH - PREVIEW_GUTTER);
   const y = Math.max(8, Math.min(rect.top, window.innerHeight - PREVIEW_HEIGHT_WITH_GUTTER));
+  prev.edgeId = '';
   prev.title = t.title || '(untitled)';
   prev.html = sanitizeRichHtml(t.bodyHtml || '') || '<em style="opacity:.45">No content yet.</em>';
   prev.x = x;
@@ -974,6 +977,7 @@ function showRelationPreview(evt, relation) {
   const x = Math.min(rect.right + 12, window.innerWidth - PREVIEW_WIDTH - PREVIEW_GUTTER);
   const y = Math.max(8, Math.min(rect.top, window.innerHeight - PREVIEW_HEIGHT_WITH_GUTTER));
   const fallbackText = [relation.label, relation.detail].filter(Boolean).join('\n\n') || relation.firstLine;
+  prev.edgeId = relation.edgeId;
   prev.title = `${relation.dir}: ${relation.title}`;
   prev.html = sanitizeRichHtml(relation.relationHtml || '') || `<p>${escapeHtml(fallbackText || 'No relationship description.')}</p>`;
   prev.x = x;
@@ -983,13 +987,20 @@ function showRelationPreview(evt, relation) {
 
 function handleRelationCardClick(evt, relation) {
   if (window.matchMedia('(hover: none)').matches) {
+    if (prev.on && prev.edgeId === relation.edgeId) {
+      loadNode(relation.targetId);
+      return;
+    }
     showRelationPreview(evt, relation);
     return;
   }
   loadNode(relation.targetId);
 }
 
-function hidePrev() { prev.on = false; }
+function hidePrev() {
+  prev.on = false;
+  prev.edgeId = '';
+}
 
 // ── Export ────────────────────────────────────────────────────────────
 function exportData() {
