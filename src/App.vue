@@ -9,6 +9,7 @@
       <input v-model="search" placeholder="Search pages…" />
       <button class="btn-icon" :class="{ active: listOpen }" title="Pages"
               @click="listOpen = !listOpen">{{ nodes.length }}</button>
+      <button class="btn-icon" title="Import JSON" @click="triggerImportData">↑</button>
       <button class="btn-icon" title="New Page" @click="createNode">+</button>
     </div>
 
@@ -39,9 +40,20 @@
 
     <div class="s-foot">
       <button class="btn-new" @click="createNode">+ New Page</button>
+      <button class="btn-icon" title="Import JSON" @click="triggerImportData">↑</button>
       <button class="btn-icon" title="Export JSON" @click="exportData">↓</button>
     </div>
   </div>
+
+  <input
+    ref="importFileInputEl"
+    class="visually-hidden"
+    type="file"
+    accept="application/json,.json"
+    tabindex="-1"
+    aria-hidden="true"
+    @change="importDataFromFile"
+  />
 
   <!-- ── Main: editor ─────────────────────────── -->
   <div class="main" v-if="current">
@@ -57,7 +69,7 @@
         >
           <defs>
             <marker id="rel-arrowhead" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto" markerUnits="strokeWidth">
-              <path d="M 0 0 L 8 4 L 0 8 z" />
+              <path d="M 0 0 L 8 4 L 0 8 z" fill="var(--accent)" />
             </marker>
           </defs>
           <g v-for="line in connectorLines" :key="line.edgeId" class="rel-connector">
@@ -118,7 +130,12 @@
             >
               <div class="rel-dir">{{ r.dir }}</div>
               <div class="rel-title">{{ r.title }}</div>
-              <div class="rel-label-text rel-page-details">{{ r.pageDetails }}</div>
+              <div
+                v-if="r.pageDetailsHtml"
+                class="rel-page-details rel-page-preview rel-rich"
+                v-html="r.pageDetailsHtml"
+              ></div>
+              <div v-else class="rel-label-text rel-page-details">{{ r.pageDetails }}</div>
               <div class="rel-foot">
                 <span class="rel-score">P={{ r.score.toFixed(1) }}</span>
                 <span class="rel-page-meta">{{ r.pageMeta }}</span>
@@ -189,7 +206,12 @@
             >
               <div class="rel-dir">{{ r.dir }}</div>
               <div class="rel-title">{{ r.title }}</div>
-              <div class="rel-label-text rel-page-details">{{ r.pageDetails }}</div>
+              <div
+                v-if="r.pageDetailsHtml"
+                class="rel-page-details rel-page-preview rel-rich"
+                v-html="r.pageDetailsHtml"
+              ></div>
+              <div v-else class="rel-label-text rel-page-details">{{ r.pageDetails }}</div>
               <div class="rel-foot">
                 <span class="rel-score">P={{ r.score.toFixed(1) }}</span>
                 <span class="rel-page-meta">{{ r.pageMeta }}</span>
@@ -352,6 +374,7 @@ const sidebarEl = ref(null);
 const mainScrollEl = ref(null);
 const relationshipCanvasEl = ref(null);
 const centerPanelEl = ref(null);
+const importFileInputEl = ref(null);
 const connectorLines = ref([]);
 const connectorCanvas = reactive({ width: 0, height: 0 });
 const relationCardEls = new Map();
@@ -736,9 +759,26 @@ function formatRelationBodyHtml(relationHtml, desc = '') {
   return `<p>${escapeHtml(fallback || 'No relationship details yet.')}</p>`;
 }
 
-function extractPageDetails(node) {
-  const plainText = node.bodyHtml ? richTextToPlainText(node.bodyHtml) : '';
-  return plainText || 'No page details yet.';
+function pageDetailsHtml(node) {
+  return sanitizeRichHtml(normalizeEditorHtml(node.bodyHtml || ''));
+}
+
+function extractPageDetailsFromHtml(bodyHtml) {
+  const plainText = bodyHtml ? richTextToPlainText(bodyHtml) : '';
+  if (plainText) return plainText;
+
+  return /<img\s[^>]*>|<img>/i.test(bodyHtml) ? 'Image-only page.' : 'No page details yet.';
+}
+
+function latestUpdatedNode() {
+  return nodes.value.reduce((latest, node) =>
+    (node.updatedAt || 0) > (latest?.updatedAt || 0) ? node : latest
+  , null);
+}
+
+async function loadLatestNode() {
+  const latest = latestUpdatedNode();
+  if (latest) await loadNode(latest.id);
 }
 
 function relationAriaLabel(relation) {
@@ -780,6 +820,7 @@ const rankedRelations = computed(() => {
     if (!relationHtml) {
       ({ label, detail } = splitRelationDescription(e.desc));
     }
+    const pageHtml = pageDetailsHtml(t);
     const relation = {
       edgeId: e.id,
       targetId: tid,
@@ -791,7 +832,8 @@ const rankedRelations = computed(() => {
       dir,
       side,
       relationLabel: extractRelationLabel(relationHtml, e.desc),
-      pageDetails: extractPageDetails(t),
+      pageDetails: extractPageDetailsFromHtml(pageHtml),
+      pageDetailsHtml: pageHtml,
       pageMeta: `Edited ${timeAgo(t.updatedAt)} · ${(t.visits || 0)} visit${t.visits !== 1 ? 's' : ''}`,
       score: pScore(e, t),
     };
@@ -1162,6 +1204,124 @@ function handleRelationCardClick(_evt, relation) {
 }
 
 // ── Export ────────────────────────────────────────────────────────────
+function triggerImportData() {
+  importFileInputEl.value?.click();
+}
+
+/**
+ * Returns value when it is a finite number, otherwise returns fallback.
+ */
+function finiteNumberOr(value, fallback) {
+  return Number.isFinite(value) ? value : fallback;
+}
+
+/**
+ * Returns value when it is a string, otherwise returns fallback.
+ */
+function stringOr(value, fallback = '') {
+  return typeof value === 'string' ? value : fallback;
+}
+
+function parseImportedGraph(raw) {
+  const parsed = JSON.parse(raw);
+  if (!parsed || typeof parsed !== 'object' || !Array.isArray(parsed.nodes) || !Array.isArray(parsed.edges)) {
+    throw new Error('Import must be a JSON object with "nodes" and "edges" arrays.');
+  }
+
+  const nodeIds = new Set();
+  let invalidNodeCount = 0;
+  const importedNodes = [];
+  const importedAt = Date.now();
+  for (const node of parsed.nodes) {
+    if (!node || typeof node !== 'object' || typeof node.id !== 'string' || !node.id || nodeIds.has(node.id)) {
+      invalidNodeCount++;
+      continue;
+    }
+
+    nodeIds.add(node.id);
+    importedNodes.push({
+      ...node,
+      title: stringOr(node.title),
+      bodyDelta: stringOr(node.bodyDelta),
+      bodyHtml: stringOr(node.bodyHtml),
+      visits: finiteNumberOr(node.visits, 0),
+      createdAt: finiteNumberOr(node.createdAt, importedAt),
+      updatedAt: finiteNumberOr(node.updatedAt, importedAt),
+    });
+  }
+
+  const edgeIds = new Set();
+  let invalidEdgeCount = 0;
+  const importedEdges = [];
+  for (const edge of parsed.edges) {
+    const isValidEdge = edge
+      && typeof edge === 'object'
+      && typeof edge.id === 'string'
+      && !!edge.id
+      && !edgeIds.has(edge.id)
+      && typeof edge.fromId === 'string'
+      && typeof edge.toId === 'string'
+      && nodeIds.has(edge.fromId)
+      && nodeIds.has(edge.toId);
+
+    if (!isValidEdge) {
+      invalidEdgeCount++;
+      continue;
+    }
+
+    edgeIds.add(edge.id);
+    importedEdges.push({
+      ...edge,
+      desc: stringOr(edge.desc),
+      descDelta: stringOr(edge.descDelta),
+      descHtml: stringOr(edge.descHtml),
+      weight: finiteNumberOr(edge.weight, DEFAULT_EDGE_WEIGHT),
+    });
+  }
+
+  if (invalidNodeCount || invalidEdgeCount) {
+    const problems = [];
+    if (invalidNodeCount) problems.push(`${invalidNodeCount} invalid node${invalidNodeCount === 1 ? '' : 's'}`);
+    if (invalidEdgeCount) problems.push(`${invalidEdgeCount} invalid edge${invalidEdgeCount === 1 ? '' : 's'}`);
+    throw new Error(`Import rejected: ${problems.join(' and ')} found. Node IDs must be non-empty and unique, and edge IDs must be non-empty and unique with valid node references.`);
+  }
+
+  return { nodes: importedNodes, edges: importedEdges };
+}
+
+async function importDataFromFile(event) {
+  const fileInput = event.target;
+  const file = fileInput.files?.[0];
+  fileInput.value = '';
+  if (!file) return;
+
+  try {
+    const imported = parseImportedGraph(await file.text());
+    if (!confirm('Import this graph and replace the current local Memograph data?')) return;
+
+    clearTimeout(saveTimer);
+    modal.on = false;
+    editor = null;
+    relEditor = null;
+    relPopover.edgeId = '';
+    relPopover.pinned = false;
+    currentId.value = null;
+    nodes.value = imported.nodes;
+    edges.value = imported.edges;
+    persist();
+
+    await nextTick();
+    if (nodes.value.length) {
+      await loadLatestNode();
+    } else {
+      scheduleConnectorUpdate();
+    }
+  } catch (error) {
+    console.warn('Unable to import Memograph data.', error);
+    alert(`Unable to import that file. ${error.message || 'The file must be a valid Memograph JSON export with nodes and edges arrays.'}`);
+  }
+}
+
 function exportData() {
   const blob = new Blob(
     [JSON.stringify({ nodes: nodes.value, edges: edges.value }, null, 2)],
@@ -1200,8 +1360,7 @@ onMounted(async () => {
   addConnectorScrollListener();
 
   if (nodes.value.length) {
-    const latest = [...nodes.value].sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0))[0];
-    await loadNode(latest.id);
+    await loadLatestNode();
   }
   scheduleConnectorUpdate();
 });
