@@ -92,7 +92,7 @@
               <div class="rel-label-text rel-first-line">{{ r.firstLine }}</div>
               <div class="rel-foot">
                 <span class="rel-score">P={{ r.score.toFixed(1) }}</span>
-                <button class="rel-preview-btn" @click.stop="showRelationPreview($event, r)" title="Preview relationship">ⓘ</button>
+                <button class="rel-preview-btn" @click.stop="showRelationPreview($event, r)" title="Preview relationship" aria-label="Preview relationship">ⓘ</button>
                 <button class="rel-del" @click.stop="dropEdge(r.edgeId)" title="Remove relation">✕</button>
               </div>
             </div>
@@ -163,7 +163,7 @@
               <div class="rel-title">{{ r.title }}</div>
               <div class="rel-foot">
                 <span class="rel-score">P={{ r.score.toFixed(1) }}</span>
-                <button class="rel-preview-btn" @click.stop="showRelationPreview($event, r)" title="Preview relationship">ⓘ</button>
+                <button class="rel-preview-btn" @click.stop="showRelationPreview($event, r)" title="Preview relationship" aria-label="Preview relationship">ⓘ</button>
                 <button class="rel-del" @click.stop="dropEdge(r.edgeId)" title="Remove relation">✕</button>
               </div>
             </div>
@@ -281,6 +281,10 @@ const MS_PER_DAY = 86_400_000;
 const PREVIEW_WIDTH = 300;
 const PREVIEW_GUTTER = 18;
 const PREVIEW_HEIGHT_WITH_GUTTER = 230;
+const RELATION_CARD_FIRST_LINE_LENGTH = 72;
+const CONNECTOR_LABEL_LENGTH = 34;
+const CONNECTOR_CENTER_TARGET_RATIO = 0.42;
+const CONNECTOR_MIN_TARGET_OFFSET = 48;
 // Keep embedded data images below a conservative URL budget because each page
 // stores both Quill delta and preview HTML in localStorage.
 const MAX_DATA_IMAGE_URL_LENGTH = 1_500_000;
@@ -651,14 +655,14 @@ function escapeHtml(text = '') {
     .replace(/'/g, '&#039;');
 }
 
-function truncateText(text = '', maxLength = 52) {
+function truncateText(text = '', maxLength) {
   return text.length > maxLength ? `${text.slice(0, maxLength - 1).trimEnd()}…` : text;
 }
 
 function relationFirstLine(relationHtml, desc = '') {
   const richText = relationHtml ? richTextToPlainText(relationHtml) : '';
   const plainText = richText || desc.replace(/\r\n/g, '\n').split('\n')[0]?.trim() || '';
-  return truncateText(plainText || 'Relationship', 72);
+  return truncateText(plainText || 'Relationship', RELATION_CARD_FIRST_LINE_LENGTH);
 }
 
 function findNode(id) {
@@ -751,7 +755,12 @@ function updateRelationConnectors() {
 
     const cardRect = card.getBoundingClientRect();
     const y1 = cardRect.top - canvasRect.top + cardRect.height / 2;
-    const y2 = centerRect.top - canvasRect.top + Math.min(centerRect.height * 0.42, Math.max(48, y1 - (centerRect.top - canvasRect.top)));
+    const centerTop = centerRect.top - canvasRect.top;
+    const targetOffset = Math.min(
+      centerRect.height * CONNECTOR_CENTER_TARGET_RATIO,
+      Math.max(CONNECTOR_MIN_TARGET_OFFSET, y1 - centerTop)
+    );
+    const y2 = centerTop + targetOffset;
     const isIncoming = r.side === 'incoming';
     const x1 = (isIncoming ? cardRect.right : cardRect.left) - canvasRect.left;
     const x2 = (isIncoming ? centerRect.left : centerRect.right) - canvasRect.left;
@@ -759,7 +768,7 @@ function updateRelationConnectors() {
     nextLines.push({
       edgeId: r.edgeId,
       path: connectorPath(x1, y1, x2, y2, r.side),
-      label: truncateText(r.firstLine, 34),
+      label: truncateText(r.firstLine, CONNECTOR_LABEL_LENGTH),
       labelX: (x1 + x2) / 2,
       labelY: (y1 + y2) / 2 - 8,
     });
