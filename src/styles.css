@@ -702,7 +702,8 @@ body {
 }
 .field input,
 .field select,
-.field textarea {
+.field textarea,
+.direction-static {
   width: 100%;
   background: var(--surface2);
   border: 1px solid var(--border);
@@ -719,6 +720,7 @@ body {
 .field textarea:focus { border-color: var(--accent); }
 .field textarea { resize: vertical; min-height: 72px; }
 .field select option { background: var(--surface2); }
+.direction-static { color: var(--muted); }
 
 .field-error {
   margin-top: 7px;

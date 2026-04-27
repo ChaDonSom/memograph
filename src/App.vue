@@ -84,15 +84,15 @@
               {{ line.label }}
             </button>
             <div
-              v-if="relPopover.edgeId === line.edgeId && relationForEdge(line.edgeId)"
+              v-if="relPopover.edgeId === line.edgeId"
               class="rel-popover"
               @click.stop
             >
-              <div class="rel-popover-title">{{ relationForEdge(line.edgeId).relationLabel }}</div>
-              <div class="rel-popover-body" v-html="relationForEdge(line.edgeId).relationBodyHtml"></div>
+              <div class="rel-popover-title">{{ line.relation.relationLabel }}</div>
+              <div class="rel-popover-body" v-html="line.relation.relationBodyHtml"></div>
               <div class="rel-popover-actions">
-                <button class="btn btn-ghost" @click="openEditRelationModal(relationForEdge(line.edgeId))">Edit relation</button>
-                <button class="btn btn-danger" @click="deleteRelationFromPopover(line.edgeId)">Delete relation</button>
+                <button class="btn btn-ghost" @click="openEditRelationModal(line.relation)">Edit relation</button>
+                <button class="btn btn-danger" @click="dropEdge(line.edgeId)">Delete relation</button>
               </div>
             </div>
           </div>
@@ -285,10 +285,11 @@
 
     <div class="field">
       <label>Direction</label>
-      <select v-model="modal.dir" :disabled="modal.mode === 'edit'">
+      <div class="direction-static" v-if="modal.mode === 'edit'">{{ modalDirectionLabel }}</div>
+      <select v-else v-model="modal.dir">
         <option value="out">This page → target (outgoing)</option>
         <option value="in">Target → this page (incoming)</option>
-        <option value="bi" v-if="modal.mode === 'add'">Bidirectional</option>
+        <option value="bi">Bidirectional</option>
       </select>
     </div>
 
@@ -458,6 +459,12 @@ const modalTitle = computed(() =>
 const modalSaveLabel = computed(() =>
   modal.mode === 'edit' ? 'Save changes' : 'Save'
 );
+
+const modalDirectionLabel = computed(() => {
+  if (modal.dir === 'in') return 'Target → this page (incoming)';
+  if (modal.dir === 'bi') return 'Bidirectional';
+  return 'This page → target (outgoing)';
+});
 
 function normalizeEditorHtml(html = '') {
   return html === '<p><br></p>' ? '' : html;
@@ -736,7 +743,7 @@ function extractRelationPreview(relationHtml, desc = '') {
   return truncateText(plainText || 'Relationship', RELATION_CARD_FIRST_LINE_LENGTH);
 }
 
-function relationBodyHtml(relationHtml, desc = '') {
+function formatRelationBodyHtml(relationHtml, desc = '') {
   const sanitizedRelationHtml = sanitizeRichHtml(relationHtml || '');
   if (sanitizedRelationHtml) return sanitizedRelationHtml;
 
@@ -795,7 +802,7 @@ const rankedRelations = computed(() => {
       label,
       detail,
       relationHtml,
-      relationBodyHtml: relationBodyHtml(relationHtml, e.desc),
+      relationBodyHtml: formatRelationBodyHtml(relationHtml, e.desc),
       dir,
       side,
       relationLabel: extractRelationPreview(relationHtml, e.desc),
@@ -816,10 +823,6 @@ const incomingRanked = computed(() =>
 const outgoingRanked = computed(() =>
   rankedRelations.value.filter(r => r.side === 'outgoing')
 );
-
-function relationForEdge(edgeId) {
-  return rankedRelations.value.find(r => r.edgeId === edgeId) ?? null;
-}
 
 function setRelationCardRef(edgeId, el) {
   if (el) {
@@ -878,6 +881,7 @@ function updateRelationConnectors() {
       edgeId: r.edgeId,
       path: connectorPath(startX, startY, endX, endY, r.side),
       label: truncateText(r.relationLabel, CONNECTOR_LABEL_MAX_LENGTH),
+      relation: r,
       labelX: (startX + endX) / 2,
       labelY: (startY + endY) / 2 - 8,
     });
@@ -1145,10 +1149,6 @@ function dropEdge(eid) {
     relPopover.pinned = false;
   }
   scheduleConnectorUpdate();
-}
-
-function deleteRelationFromPopover(edgeId) {
-  dropEdge(edgeId);
 }
 
 function showRelationPopover(edgeId) {
