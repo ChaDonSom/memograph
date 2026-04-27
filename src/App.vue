@@ -712,7 +712,8 @@ function setRelationCardRef(edgeId, el) {
   }
 }
 
-function connectorPath(startX, startY, endX, endY, _relationSide) {
+// Both sides flow left-to-right; control points pull inward for a smooth S-curve.
+function connectorPath(startX, startY, endX, endY) {
   const curve = Math.min(120, Math.max(48, Math.abs(endX - startX) * 0.45));
   return `M ${startX} ${startY} C ${startX + curve} ${startY}, ${endX - curve} ${endY}, ${endX} ${endY}`;
 }
@@ -756,7 +757,7 @@ function updateRelationConnectors() {
 
     nextLines.push({
       edgeId: r.edgeId,
-      path: connectorPath(startX, startY, endX, endY, r.side),
+      path: connectorPath(startX, startY, endX, endY),
       label: truncateText(r.relationLabel, CONNECTOR_LABEL_MAX_LENGTH),
       relation: r,
       labelX: (startX + endX) / 2,
@@ -1111,14 +1112,24 @@ function handleRelationCardClick(evt, relation) {
     return;
   }
 
+  // Morph the clicked card into the center panel position.
   const cardEl = evt.currentTarget;
   cardEl.style.viewTransitionName = 'page-center';
   if (centerPanelEl.value) centerPanelEl.value.style.viewTransitionName = '';
 
-  document.startViewTransition(async () => {
-    cardEl.style.viewTransitionName = '';
-    await loadNode(relation.targetId);
-    await nextTick();
+  const transition = document.startViewTransition(async () => {
+    try {
+      cardEl.style.viewTransitionName = '';
+      await loadNode(relation.targetId);
+      await nextTick();
+      if (centerPanelEl.value) centerPanelEl.value.style.viewTransitionName = 'page-center';
+    } finally {
+      // Always restore names so a cancelled transition leaves no stale state.
+      cardEl.style.viewTransitionName = '';
+      if (centerPanelEl.value) centerPanelEl.value.style.viewTransitionName = 'page-center';
+    }
+  });
+  transition.finished.catch(() => {
     if (centerPanelEl.value) centerPanelEl.value.style.viewTransitionName = 'page-center';
   });
 }

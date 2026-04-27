@@ -30,10 +30,16 @@ export function richTextFirstLine(html = '') {
   return firstNormalizedLine(doc.body.textContent || '');
 }
 
+// Decodes only the entities that escapeHtml produces, avoiding the innerHTML
+// pattern that would let arbitrary HTML content execute in older parsers.
 export function decodeHtmlEntities(text = '') {
-  const textarea = document.createElement('textarea');
-  textarea.innerHTML = text;
-  return textarea.value;
+  return text
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#039;/g, "'")
+    .replace(/&apos;/g, "'");
 }
 
 export function escapeHtml(text = '') {
