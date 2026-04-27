@@ -45,7 +45,7 @@
 
   <!-- ── Main: editor ─────────────────────────── -->
   <div class="main" v-if="current">
-    <div class="main-scroll">
+    <div class="main-scroll" ref="mainScrollEl">
       <div class="relationship-canvas" ref="relationshipCanvasEl">
         <svg
           class="rel-connectors"
@@ -81,8 +81,8 @@
               tabindex="0"
               :aria-label="r.ariaLabel"
               @click="handleRelationCardClick($event, r)"
-              @keydown.enter.prevent="loadNode(r.targetId)"
-              @keydown.space.prevent="showRelationPreview($event, r)"
+              @keydown.enter.self.prevent="loadNode(r.targetId)"
+              @keydown.space.self.prevent="showRelationPreview($event, r)"
               @mouseenter="showRelationPreview($event, r)"
               @mouseleave="hidePrev"
               @focusin="showRelationPreview($event, r)"
@@ -93,7 +93,7 @@
               <div class="rel-label-text rel-first-line">{{ r.firstLine }}</div>
               <div class="rel-foot">
                 <span class="rel-score">P={{ r.score.toFixed(1) }}</span>
-                <button class="rel-del" @click.stop="dropEdge(r.edgeId)" title="Remove relation">✕</button>
+                <button class="rel-del" @click.stop="dropEdge(r.edgeId)" @keydown.stop title="Remove relation">✕</button>
               </div>
             </div>
           </div>
@@ -152,8 +152,8 @@
               tabindex="0"
               :aria-label="r.ariaLabel"
               @click="handleRelationCardClick($event, r)"
-              @keydown.enter.prevent="loadNode(r.targetId)"
-              @keydown.space.prevent="showRelationPreview($event, r)"
+              @keydown.enter.self.prevent="loadNode(r.targetId)"
+              @keydown.space.self.prevent="showRelationPreview($event, r)"
               @mouseenter="showRelationPreview($event, r)"
               @mouseleave="hidePrev"
               @focusin="showRelationPreview($event, r)"
@@ -164,7 +164,7 @@
               <div class="rel-label-text rel-first-line">{{ r.firstLine }}</div>
               <div class="rel-foot">
                 <span class="rel-score">P={{ r.score.toFixed(1) }}</span>
-                <button class="rel-del" @click.stop="dropEdge(r.edgeId)" title="Remove relation">✕</button>
+                <button class="rel-del" @click.stop="dropEdge(r.edgeId)" @keydown.stop title="Remove relation">✕</button>
               </div>
             </div>
           </div>
@@ -328,6 +328,7 @@ const currentId = ref(null);
 const search = ref('');
 const listOpen = ref(false);
 const sidebarEl = ref(null);
+const mainScrollEl = ref(null);
 const relationshipCanvasEl = ref(null);
 const centerPanelEl = ref(null);
 const connectorLines = ref([]);
@@ -758,7 +759,7 @@ function connectorCenterVerticalOffset(centerHeight, cardMidpointY, centerTop) {
 function updateRelationConnectors() {
   const canvas = relationshipCanvasEl.value;
   const center = centerPanelEl.value;
-  if (!canvas || !center || window.matchMedia('(max-width: 1100px)').matches) {
+  if (!canvas || !center || window.matchMedia('(max-width: 900px)').matches) {
     connectorLines.value = [];
     return;
   }
@@ -774,19 +775,23 @@ function updateRelationConnectors() {
     if (!card) continue;
 
     const cardRect = card.getBoundingClientRect();
-    const y1 = cardRect.top - canvasRect.top + cardRect.height / 2;
+    const cardMidpointY = cardRect.top - canvasRect.top + cardRect.height / 2;
     const centerTop = centerRect.top - canvasRect.top;
-    const y2 = centerTop + connectorCenterVerticalOffset(centerRect.height, y1, centerTop);
+    const centerAttachmentY = centerTop + connectorCenterVerticalOffset(centerRect.height, cardMidpointY, centerTop);
     const isIncoming = r.side === 'incoming';
-    const x1 = (isIncoming ? cardRect.right : cardRect.left) - canvasRect.left;
-    const x2 = (isIncoming ? centerRect.left : centerRect.right) - canvasRect.left;
+    const cardInnerX = (isIncoming ? cardRect.right : cardRect.left) - canvasRect.left;
+    const centerEdgeX = (isIncoming ? centerRect.left : centerRect.right) - canvasRect.left;
+    const startX = isIncoming ? cardInnerX : centerEdgeX;
+    const startY = isIncoming ? cardMidpointY : centerAttachmentY;
+    const endX = isIncoming ? centerEdgeX : cardInnerX;
+    const endY = isIncoming ? centerAttachmentY : cardMidpointY;
 
     nextLines.push({
       edgeId: r.edgeId,
-      path: connectorPath(x1, y1, x2, y2, r.side),
+      path: connectorPath(startX, startY, endX, endY, r.side),
       label: truncateText(r.firstLine, CONNECTOR_LABEL_LENGTH),
-      labelX: (x1 + x2) / 2,
-      labelY: (y1 + y2) / 2 - 8,
+      labelX: (startX + endX) / 2,
+      labelY: (startY + endY) / 2 - 8,
     });
   }
 
@@ -805,6 +810,14 @@ function observeConnectorTargets() {
   if (!connectorResizeObserver) return;
   if (relationshipCanvasEl.value) connectorResizeObserver.observe(relationshipCanvasEl.value);
   if (centerPanelEl.value) connectorResizeObserver.observe(centerPanelEl.value);
+}
+
+function addConnectorScrollListener() {
+  mainScrollEl.value?.addEventListener('scroll', scheduleConnectorUpdate, { passive: true });
+}
+
+function removeConnectorScrollListener() {
+  mainScrollEl.value?.removeEventListener('scroll', scheduleConnectorUpdate);
 }
 
 // ── Quill ─────────────────────────────────────────────────────────────
@@ -880,6 +893,7 @@ async function loadNode(id) {
   await nextTick();
   initEditor();
   observeConnectorTargets();
+  addConnectorScrollListener();
   scheduleConnectorUpdate();
 }
 
@@ -1051,6 +1065,7 @@ onMounted(async () => {
   window.addEventListener('resize', scheduleConnectorUpdate);
   connectorResizeObserver = new ResizeObserver(scheduleConnectorUpdate);
   observeConnectorTargets();
+  addConnectorScrollListener();
 
   if (nodes.value.length) {
     const latest = [...nodes.value].sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0))[0];
@@ -1061,6 +1076,7 @@ onMounted(async () => {
 
 onBeforeUnmount(() => {
   window.removeEventListener('resize', scheduleConnectorUpdate);
+  removeConnectorScrollListener();
   connectorResizeObserver?.disconnect();
   if (connectorFrame) cancelAnimationFrame(connectorFrame);
 });
