@@ -27,6 +27,8 @@ Configure these environment variables in the Vercel project:
 - `MEMGRAPH_USER` - Memgraph username, if authentication is enabled
 - `MEMGRAPH_PASSWORD` - Memgraph password, if authentication is enabled
 
+For production setup details, hosting options, TLS notes, and a launch checklist, see [Memgraph + Vercel production deployment guide](docs/memgraph-vercel-production.md).
+
 ## Data storage path
 
 Current data is loaded and saved through `src/services/graphRepository.js`, which calls `/api/graph/load` and `/api/graph/save`. The API routes store pages as `(:Page)` nodes and relationships as `[:RELATION]` edges in Memgraph.
