@@ -299,7 +299,6 @@ const modal = reactive({
   on: false,
   targetId: '',
   targetSearch: '',
-  desc: '',
   editorError: '',
   dir: 'out',
   w: DEFAULT_EDGE_WEIGHT,
@@ -705,6 +704,10 @@ function createGraphNode(title = '') {
   return node;
 }
 
+function createGraphEdge(fromId, toId, desc, descDelta, descHtml, weight) {
+  return { id: uid(), fromId, toId, desc, descDelta, descHtml, weight };
+}
+
 async function createNode() {
   const node = createGraphNode();
   await loadNode(node.id);
@@ -726,7 +729,6 @@ function openModal() {
     on: true,
     targetId: '',
     targetSearch: '',
-    desc: '',
     editorError: '',
     dir: 'out',
     w: DEFAULT_EDGE_WEIGHT,
@@ -761,9 +763,9 @@ function saveRel() {
   const desc = relEditor.getText().trim();
   const descDelta = JSON.stringify(sanitizeRichDelta(relEditor.getContents()));
   const descHtml = sanitizeRichHtml(normalizeEditorHtml(relEditor.root.innerHTML));
-  edges.value.push({ id: uid(), fromId: from, toId: to, desc, descDelta, descHtml, weight: modal.w });
+  edges.value.push(createGraphEdge(from, to, desc, descDelta, descHtml, modal.w));
   if (modal.dir === 'bi') {
-    edges.value.push({ id: uid(), fromId: to, toId: from, desc, descDelta, descHtml, weight: modal.w });
+    edges.value.push(createGraphEdge(to, from, desc, descDelta, descHtml, modal.w));
   }
   closeModal();
   persist();
@@ -805,15 +807,15 @@ function exportData() {
 }
 
 // ── Click-outside: close the pages overlay when tapping away ──────────
-watch(listOpen, (open) => {
+watch(listOpen, (open, _oldValue, onCleanup) => {
   if (!open) return;
   function onPointerDown(e) {
     if (sidebarEl.value && !sidebarEl.value.contains(e.target)) {
       listOpen.value = false;
-      document.removeEventListener('pointerdown', onPointerDown);
     }
   }
   document.addEventListener('pointerdown', onPointerDown);
+  onCleanup(() => document.removeEventListener('pointerdown', onPointerDown));
 });
 
 // ── Mount ─────────────────────────────────────────────────────────────
