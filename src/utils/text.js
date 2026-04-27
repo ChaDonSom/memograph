@@ -31,8 +31,9 @@ export function richTextFirstLine(html = '') {
 }
 
 export function decodeHtmlEntities(text = '') {
-  const doc = new DOMParser().parseFromString(text, 'text/html');
-  return doc.body.textContent ?? '';
+  const textarea = document.createElement('textarea');
+  textarea.innerHTML = text;
+  return textarea.value;
 }
 
 export function escapeHtml(text = '') {
