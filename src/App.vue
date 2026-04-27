@@ -81,7 +81,7 @@
             v-for="line in connectorLines"
             :key="line.edgeId"
             class="rel-connector"
-            :class="{ 'rel-connector--hop2': line.isHop2 }"
+            :class="{ 'rel-connector--remote': line.isRemote }"
           >
             <path :d="line.path" marker-end="url(#rel-arrowhead)" />
           </g>
@@ -123,7 +123,7 @@
         <section class="relation-side relation-side--incoming" aria-label="Incoming relationships">
           <div class="relation-side-head">
             <span class="rel-label">Incoming</span>
-            <span class="rel-count">{{ incomingRanked.length }}</span>
+            <span class="rel-count" title="Direct / visible total">{{ incomingRanked.length }} / {{ incomingRanked.length + remoteIncoming.length }}</span>
           </div>
           <div class="rel-column" v-if="incomingRanked.length">
             <div
@@ -131,6 +131,8 @@
               :key="r.edgeId"
               :ref="el => setRelationCardRef(r.edgeId, el)"
               class="rel-card rel-card--side"
+              :class="relationCardSizeClass(r)"
+              :style="relationCardStyle(r)"
               role="button"
               tabindex="0"
               :aria-label="r.ariaLabel"
@@ -157,14 +159,15 @@
             </div>
           </div>
           <div class="rel-empty" v-else>No incoming relations.</div>
-          <!-- 2-hop incoming neighbours (half-size) -->
-          <div v-if="hop2Incoming.length" class="rel-column rel-column--hop2">
-            <div class="rel-hop-label">2nd-hop incoming</div>
+          <div v-if="remoteIncoming.length" class="rel-column rel-column--remote">
+            <div class="rel-hop-label">Further incoming</div>
             <div
-              v-for="r in hop2Incoming"
+              v-for="r in remoteIncoming"
               :key="r.edgeId"
               :ref="el => setRelationCardRef(r.edgeId, el)"
-              class="rel-card rel-card--side rel-card--hop2"
+              class="rel-card rel-card--side rel-card--remote"
+              :class="relationCardSizeClass(r)"
+              :style="relationCardStyle(r)"
               role="button"
               tabindex="0"
               :aria-label="r.ariaLabel"
@@ -242,7 +245,7 @@
         <section class="relation-side relation-side--outgoing" aria-label="Outgoing relationships">
           <div class="relation-side-head">
             <span class="rel-label">Outgoing</span>
-            <span class="rel-count">{{ outgoingRanked.length }}</span>
+            <span class="rel-count" title="Direct / visible total">{{ outgoingRanked.length }} / {{ outgoingRanked.length + remoteOutgoing.length }}</span>
           </div>
           <div class="rel-column" v-if="outgoingRanked.length">
             <div
@@ -250,6 +253,8 @@
               :key="r.edgeId"
               :ref="el => setRelationCardRef(r.edgeId, el)"
               class="rel-card rel-card--side"
+              :class="relationCardSizeClass(r)"
+              :style="relationCardStyle(r)"
               role="button"
               tabindex="0"
               :aria-label="r.ariaLabel"
@@ -276,14 +281,15 @@
             </div>
           </div>
           <div class="rel-empty" v-else>No outgoing relations.</div>
-          <!-- 2-hop outgoing neighbours (half-size) -->
-          <div v-if="hop2Outgoing.length" class="rel-column rel-column--hop2">
-            <div class="rel-hop-label">2nd-hop outgoing</div>
+          <div v-if="remoteOutgoing.length" class="rel-column rel-column--remote">
+            <div class="rel-hop-label">Further outgoing</div>
             <div
-              v-for="r in hop2Outgoing"
+              v-for="r in remoteOutgoing"
               :key="r.edgeId"
               :ref="el => setRelationCardRef(r.edgeId, el)"
-              class="rel-card rel-card--side rel-card--hop2"
+              class="rel-card rel-card--side rel-card--remote"
+              :class="relationCardSizeClass(r)"
+              :style="relationCardStyle(r)"
               role="button"
               tabindex="0"
               :aria-label="r.ariaLabel"
@@ -451,6 +457,11 @@ const CONNECTOR_MAX_CURVE = 120;
 const CONNECTOR_MIN_CURVE = 48;
 const CONNECTOR_VERTICAL_CURVE_RATIO = 0.35;
 const CONNECTOR_HORIZONTAL_CURVE_RATIO = 0.45;
+const REMOTE_HOP_DECAY = 0.62;
+const REMOTE_MIN_SCORE = 4;
+const REMOTE_MAX_CARDS_PER_SIDE = 36;
+const CARD_SCORE_LOW = 12;
+const CARD_SCORE_HIGH = 30;
 
 const stored = loadGraph();
 const nodes = ref(stored.nodes);
@@ -588,6 +599,30 @@ function relationAriaLabel(relation) {
   return `${relation.dir} ${relation.title}. ${details}. Press Enter or Space to open related page.`;
 }
 
+function clamp(value, min, max) {
+  return Math.min(max, Math.max(min, value));
+}
+
+function importanceRatio(score) {
+  return clamp((score - CARD_SCORE_LOW) / (CARD_SCORE_HIGH - CARD_SCORE_LOW), 0, 1);
+}
+
+function relationCardSizeClass(relation) {
+  const ratio = importanceRatio(relation.score);
+  return {
+    'rel-card--small': ratio < 0.25,
+    'rel-card--large': ratio > 0.7,
+  };
+}
+
+function relationCardStyle(relation) {
+  const ratio = importanceRatio(relation.score);
+  return {
+    '--rel-importance': ratio.toFixed(3),
+    '--rel-hop-indent': `${Math.min((relation.hop || 1) - 1, 5) * 8}px`,
+  };
+}
+
 function findNode(id) {
   return nodes.value.find(n => n.id === id) ?? null;
 }
@@ -638,6 +673,7 @@ const rankedRelations = computed(() => {
       pageDetailsHtml: pageHtml,
       pageMeta: `Edited ${timeAgo(t.updatedAt)} \u00b7 ${(t.visits || 0)} visit${t.visits !== 1 ? 's' : ''}`,
       score: pScore(e, t),
+      hop: 1,
     };
     relation.ariaLabel = relationAriaLabel(relation);
     out.push(relation);
@@ -654,7 +690,7 @@ const outgoingRanked = computed(() =>
 );
 
 const connectorLabelLines = computed(() =>
-  connectorLines.value.filter(line => !line.isHop2)
+  connectorLines.value.filter(line => line.label)
 );
 
 function addEdgeToLookup(lookup, nodeId, edge) {
@@ -672,87 +708,69 @@ const edgeLookups = computed(() => {
   return { byFromId, byToId };
 });
 
-const hop2Incoming = computed(() => {
-  if (!currentId.value) return [];
-  const alreadyShown = new Set([
-    currentId.value,
-    ...incomingRanked.value.map(r => r.targetId),
-    ...outgoingRanked.value.map(r => r.targetId),
-  ]);
+function remoteRelationCandidate(edge, node, parent, hop, side) {
+  const score = pScore(edge, node) * Math.pow(REMOTE_HOP_DECAY, hop - 1);
+  const pageHtml = pageDetailsHtml(node);
+  return {
+    edgeId: `${side}-hop${hop}-${edge.id}`,
+    targetId: node.id,
+    parentEdgeId: parent.edgeId,
+    title: node.title || '(untitled)',
+    score,
+    hop,
+    pageDetails: extractPageDetailsFromHtml(pageHtml),
+    pageDetailsHtml: pageHtml,
+    pageMeta: `Edited ${timeAgo(node.updatedAt)} \u00b7 ${node.visits || 0} visit${node.visits !== 1 ? 's' : ''}`,
+    dir: side === 'incoming' ? `\u2190 ${hop}-hop` : `\u2192 ${hop}-hop`,
+    side,
+  };
+}
 
-  const results = [];
-  for (const r of incomingRanked.value) {
-    for (const edge of edgeLookups.value.byToId.get(r.targetId) || []) {
-      if (edge.toId === r.targetId && !alreadyShown.has(edge.fromId)) {
-        const node = findNode(edge.fromId);
-        if (!node) continue;
-        alreadyShown.add(node.id);
-        const score = pScore(edge, node);
-        const pageHtml = pageDetailsHtml(node);
-        results.push({
-          edgeId: `hop2-${edge.id}`,
-          targetId: node.id,
-          parentEdgeId: r.edgeId,
-          title: node.title || '(untitled)',
-          score,
-          pageDetails: extractPageDetailsFromHtml(pageHtml),
-          pageDetailsHtml: pageHtml,
-          pageMeta: `Edited ${timeAgo(node.updatedAt)} \u00b7 ${node.visits || 0} visit${node.visits !== 1 ? 's' : ''}`,
-          dir: '\u2190 2-hop',
-          side: 'incoming', // Connector positioning uses this to choose arrow endpoints.
-        });
+function discoverRemoteRelations(side, directRelations) {
+  if (!currentId.value) return [];
+  const allDirectIds = new Set(rankedRelations.value.map(r => r.targetId));
+  const seenNodeIds = new Set([currentId.value, ...allDirectIds]);
+  const visibleByNodeId = new Map();
+  const queue = directRelations.map(relation => ({ relation, hop: 1 }));
+
+  for (let i = 0; i < queue.length; i++) {
+    const { relation: parent, hop } = queue[i];
+    const nextHop = hop + 1;
+    const nextEdges = side === 'incoming'
+      ? edgeLookups.value.byToId.get(parent.targetId) || []
+      : edgeLookups.value.byFromId.get(parent.targetId) || [];
+
+    for (const edge of nextEdges) {
+      const targetId = side === 'incoming' ? edge.fromId : edge.toId;
+      if (seenNodeIds.has(targetId)) continue;
+      const node = findNode(targetId);
+      if (!node) continue;
+
+      seenNodeIds.add(targetId);
+      const candidate = remoteRelationCandidate(edge, node, parent, nextHop, side);
+      queue.push({ relation: candidate, hop: nextHop });
+      if (candidate.score >= REMOTE_MIN_SCORE) {
+        visibleByNodeId.set(node.id, candidate);
       }
     }
   }
-  return results
-    .sort((a, b) => b.score - a.score)
-    .slice(0, 8)
+
+  return [...visibleByNodeId.values()]
+    .sort((a, b) => b.score - a.score || a.hop - b.hop)
+    .slice(0, REMOTE_MAX_CARDS_PER_SIDE)
     .map(relation => ({
       ...relation,
       ariaLabel: relationAriaLabel(relation),
     }));
-});
+}
 
-const hop2Outgoing = computed(() => {
-  if (!currentId.value) return [];
-  const alreadyShown = new Set([
-    currentId.value,
-    ...incomingRanked.value.map(r => r.targetId),
-    ...outgoingRanked.value.map(r => r.targetId),
-  ]);
+const remoteIncoming = computed(() =>
+  discoverRemoteRelations('incoming', incomingRanked.value)
+);
 
-  const results = [];
-  for (const r of outgoingRanked.value) {
-    for (const edge of edgeLookups.value.byFromId.get(r.targetId) || []) {
-      if (edge.fromId === r.targetId && !alreadyShown.has(edge.toId)) {
-        const node = findNode(edge.toId);
-        if (!node) continue;
-        alreadyShown.add(node.id);
-        const score = pScore(edge, node);
-        const pageHtml = pageDetailsHtml(node);
-        results.push({
-          edgeId: `hop2-${edge.id}`,
-          targetId: node.id,
-          parentEdgeId: r.edgeId,
-          title: node.title || '(untitled)',
-          score,
-          pageDetails: extractPageDetailsFromHtml(pageHtml),
-          pageDetailsHtml: pageHtml,
-          pageMeta: `Edited ${timeAgo(node.updatedAt)} \u00b7 ${node.visits || 0} visit${node.visits !== 1 ? 's' : ''}`,
-          dir: '\u2192 2-hop',
-          side: 'outgoing', // Connector positioning uses this to choose arrow endpoints.
-        });
-      }
-    }
-  }
-  return results
-    .sort((a, b) => b.score - a.score)
-    .slice(0, 8)
-    .map(relation => ({
-      ...relation,
-      ariaLabel: relationAriaLabel(relation),
-    }));
-});
+const remoteOutgoing = computed(() =>
+  discoverRemoteRelations('outgoing', outgoingRanked.value)
+);
 
 function setRelationCardRef(edgeId, el) {
   if (el) {
@@ -829,7 +847,7 @@ function updateRelationConnectors() {
     });
   }
 
-  for (const r of [...hop2Incoming.value, ...hop2Outgoing.value]) {
+  for (const r of [...remoteIncoming.value, ...remoteOutgoing.value]) {
     const card = relationCardEls.get(r.edgeId);
     const parent = relationCardEls.get(r.parentEdgeId);
     if (!card || !parent) continue;
@@ -849,7 +867,7 @@ function updateRelationConnectors() {
     nextLines.push({
       edgeId: r.edgeId,
       path: connectorPath(startX, startY, endX, endY),
-      isHop2: true,
+      isRemote: true,
     });
   }
 
@@ -1034,31 +1052,48 @@ async function loadNode(id) {
   scheduleConnectorUpdate();
 }
 
+function relationCardForTarget(targetId) {
+  const relation = [
+    ...rankedRelations.value,
+    ...remoteIncoming.value,
+    ...remoteOutgoing.value,
+  ].find(r => r.targetId === targetId);
+  return relation ? relationCardEls.get(relation.edgeId) : null;
+}
+
 async function navigateToNode(id, sourceEl = null) {
   if (!document.startViewTransition) {
     await loadNode(id);
     return;
   }
 
+  const previousId = currentId.value;
   const oldCenter = centerPanelEl.value;
   if (sourceEl) {
     sourceEl.style.viewTransitionName = 'page-center';
-    if (oldCenter) oldCenter.style.viewTransitionName = 'none';
+    if (oldCenter) oldCenter.style.viewTransitionName = 'page-card';
   } else if (oldCenter) {
     oldCenter.style.viewTransitionName = 'page-center';
   }
 
+  let oldPageCard = null;
   const transition = document.startViewTransition(async () => {
     if (sourceEl) sourceEl.style.viewTransitionName = 'none';
     await loadNode(id);
     await nextTick();
     if (centerPanelEl.value) centerPanelEl.value.style.viewTransitionName = 'page-center';
+    if (sourceEl && previousId) {
+      oldPageCard = relationCardForTarget(previousId);
+      if (oldPageCard) oldPageCard.style.viewTransitionName = 'page-card';
+    }
   });
 
   try {
     await transition.finished;
   } finally {
     if (sourceEl) sourceEl.style.viewTransitionName = '';
+    if (oldCenter) oldCenter.style.viewTransitionName = 'none';
+    if (oldPageCard) oldPageCard.style.viewTransitionName = '';
     if (centerPanelEl.value) centerPanelEl.value.style.viewTransitionName = 'none';
   }
 }
@@ -1372,7 +1407,7 @@ watch(listOpen, (open, _oldValue, onCleanup) => {
   onCleanup(() => document.removeEventListener('pointerdown', onPointerDown));
 });
 
-watch(rankedRelations, async () => {
+watch([rankedRelations, remoteIncoming, remoteOutgoing], async () => {
   await nextTick();
   scheduleConnectorUpdate();
 }, { flush: 'post' });

@@ -345,7 +345,15 @@ body {
 
 .rel-empty { font-size: 13px; color: var(--dim); }
 
-.rel-column { display: flex; flex-direction: column; gap: 12px; }
+.rel-column {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.rel-column--remote {
+  margin-top: 4px;
+}
 
 .rel-card {
   background: var(--surface);
@@ -362,8 +370,19 @@ body {
 }
 
 .rel-card--side {
-  min-height: 132px;
-  max-height: 196px;
+  min-height: calc(108px + var(--rel-importance, 0) * 54px);
+  max-height: calc(148px + var(--rel-importance, 0) * 92px);
+  margin-left: var(--rel-hop-indent, 0);
+}
+
+.rel-card--small {
+  opacity: .78;
+  border-style: dashed;
+}
+
+.rel-card--large {
+  border-color: rgba(129,140,248,.48);
+  box-shadow: 0 0 0 1px rgba(129,140,248,.08);
 }
 
 .rel-card--side:focus-visible {
@@ -394,7 +413,7 @@ body {
 }
 
 .rel-page-details {
-  max-height: 74px;
+  max-height: calc(52px + var(--rel-importance, 0) * 58px);
   overflow-y: auto;
   padding-right: 3px;
   white-space: normal;
@@ -409,7 +428,7 @@ body {
 .rel-page-preview img {
   display: block;
   max-width: 100%;
-  max-height: 70px;
+  max-height: calc(48px + var(--rel-importance, 0) * 42px);
   height: auto;
   object-fit: contain;
 }
@@ -534,7 +553,7 @@ body {
 
 .rel-connector marker path { fill: var(--accent); }
 
-.rel-connector--hop2 path {
+.rel-connector--remote path {
   stroke: rgba(129, 140, 248, .32);
   stroke-dasharray: 4 4;
   stroke-width: 1.2;
@@ -1011,6 +1030,12 @@ body {
 ::view-transition-new(page-center) {
   animation: 220ms ease both vt-fade-in;
 }
+::view-transition-old(page-card) {
+  animation: 220ms ease both vt-fade-out;
+}
+::view-transition-new(page-card) {
+  animation: 220ms ease both vt-fade-in;
+}
 @keyframes vt-fade-out {
   from { opacity: 1; transform: scale(1); }
   to   { opacity: 0; transform: scale(0.97); }
@@ -1019,14 +1044,12 @@ body {
   from { opacity: 0; transform: scale(1.02); }
   to   { opacity: 1; transform: scale(1); }
 }
-.rel-card--hop2 {
-  font-size: 0.6em;
-  min-height: unset;
-  max-height: 120px;
-  opacity: 0.75;
+.rel-card--remote {
+  font-size: .86em;
+  opacity: calc(.62 + var(--rel-importance, 0) * .32);
   border-style: dashed;
 }
-.rel-card--hop2:hover {
+.rel-card--remote:hover {
   opacity: 1;
 }
 .rel-hop-label {
