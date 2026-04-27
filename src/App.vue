@@ -543,7 +543,7 @@ let connectorFrame = null;
 let connectorResizeObserver = null;
 const activeRelationEdgeId = ref('');
 const activeRelationNodeId = ref('');
-const activeRelationNodeIds = ref(new Set());
+const activeRelationNodeIdSet = ref(new Set());
 
 const imageResizeBar = reactive({
   visible: false,
@@ -814,7 +814,10 @@ function remoteRelationCandidate(edge, node, parent, hop, side) {
 function hydrateRemoteRelation(relation) {
   const edge = findEdge(relation.graphEdgeId);
   const node = findNode(relation.targetId);
-  if (!edge || !node) return null;
+  if (!edge || !node) {
+    console.warn('Unable to render remote relation because its edge or target page is missing.', relation);
+    return null;
+  }
   const relationHtml = sanitizeRichHtml(normalizeEditorHtml(edge.descHtml || ''));
   const pageHtml = pageDetailsHtml(node);
   const hydrated = {
@@ -845,6 +848,7 @@ function discoverRemoteRelations(side, directRelations) {
   const directEdgeIds = new Set(directRelations.map(r => r.edgeId));
   const queue = directRelations.map(relation => ({ relation, hop: 1 }));
 
+  // First collect candidate remote cards, then add any ancestors needed to keep visible connector chains intact.
   // The traversal queue includes low-scoring candidates so high-scoring descendants can still surface.
   for (let i = 0; i < queue.length; i++) {
     const { relation: parent, hop } = queue[i];
@@ -978,7 +982,7 @@ function resolveEndpointGroups(endpointGroups, canvasTop) {
 }
 
 function relationTouchesNode(relation, nodeId) {
-  return !!nodeId && (relation?.fromId === nodeId || relation?.toId === nodeId);
+  return !!nodeId && !!relation && (relation.fromId === nodeId || relation.toId === nodeId);
 }
 
 function lineEndpointNodeIds(line) {
@@ -988,7 +992,7 @@ function lineEndpointNodeIds(line) {
 function activateRelationLine(line) {
   activeRelationEdgeId.value = line.edgeId;
   activeRelationNodeId.value = '';
-  activeRelationNodeIds.value = new Set(lineEndpointNodeIds(line));
+  activeRelationNodeIdSet.value = new Set(lineEndpointNodeIds(line));
 }
 
 function activateRelationNode(nodeId) {
@@ -1000,17 +1004,17 @@ function activateRelationNode(nodeId) {
   }
   activeRelationEdgeId.value = '';
   activeRelationNodeId.value = nodeId;
-  activeRelationNodeIds.value = highlightedIds;
+  activeRelationNodeIdSet.value = highlightedIds;
 }
 
 function clearRelationHighlight() {
   activeRelationEdgeId.value = '';
   activeRelationNodeId.value = '';
-  activeRelationNodeIds.value = new Set();
+  activeRelationNodeIdSet.value = new Set();
 }
 
 function isNodeHighlighted(nodeId) {
-  return activeRelationNodeIds.value.has(nodeId);
+  return activeRelationNodeIdSet.value.has(nodeId);
 }
 
 function isRelationCardHighlighted(relation) {
