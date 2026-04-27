@@ -813,7 +813,7 @@ function hydrateRemoteRelation(relation) {
   const edge = findEdge(relation.graphEdgeId);
   const node = findNode(relation.targetId);
   if (!edge || !node) {
-    console.warn('Unable to render remote relation because its edge or target page is missing.', relation);
+    console.warn(`Unable to render remote relation ${relation.edgeId} because edge ${relation.graphEdgeId} or target page ${relation.targetId} is missing.`, relation);
     return null;
   }
   const relationHtml = sanitizeRichHtml(normalizeEditorHtml(edge.descHtml || ''));
@@ -996,6 +996,7 @@ function activateRelationLine(line) {
 function activateRelationNode(nodeId) {
   if (!nodeId) return;
   const highlightedIds = new Set([nodeId]);
+  // Hover/focus enters are discrete; derive highlighting from the currently rendered connector set.
   for (const line of connectorLines.value) {
     if (!relationTouchesNode(line.relation, nodeId)) continue;
     for (const endpointId of lineEndpointNodeIds(line)) highlightedIds.add(endpointId);
@@ -1048,8 +1049,8 @@ function updateRelationConnectors() {
   connectorCanvas.height = Math.round(canvasRect.height);
 
   const endpointGroups = new Map();
-  const directDescriptors = [];
-  const remoteDescriptors = [];
+  const directConnectorDescriptors = [];
+  const remoteConnectorDescriptors = [];
 
   for (const r of rankedRelations.value) {
     const card = relationCardEls.get(r.edgeId);
@@ -1060,7 +1061,7 @@ function updateRelationConnectors() {
     const isIncoming = r.side === 'incoming';
     const cardSide = isIncoming ? 'right' : 'left';
     const centerSide = isIncoming ? 'left' : 'right';
-    directDescriptors.push({
+    directConnectorDescriptors.push({
       relation: r,
       isIncoming,
       cardX: (isIncoming ? cardRect.right : cardRect.left) - canvasRect.left,
@@ -1084,7 +1085,7 @@ function updateRelationConnectors() {
     const parentX = (isIncoming ? parentRect.right : parentRect.left) - canvasRect.left;
     const cardY = cardRect.top - canvasRect.top + cardRect.height / 2;
     const parentY = parentRect.top - canvasRect.top + parentRect.height / 2;
-    remoteDescriptors.push({
+    remoteConnectorDescriptors.push({
       relation: r,
       remoteIndex,
       isIncoming,
@@ -1097,7 +1098,7 @@ function updateRelationConnectors() {
 
   resolveEndpointGroups(endpointGroups, canvasRect.top);
   const nextLines = [];
-  for (const descriptor of directDescriptors) {
+  for (const descriptor of directConnectorDescriptors) {
     const { relation: r, isIncoming, cardX, centerX, cardEndpoint, centerEndpoint } = descriptor;
     const startX = isIncoming ? cardX : centerX;
     const startY = isIncoming ? cardEndpoint.y : centerEndpoint.y;
@@ -1114,7 +1115,7 @@ function updateRelationConnectors() {
     });
   }
 
-  for (const descriptor of remoteDescriptors) {
+  for (const descriptor of remoteConnectorDescriptors) {
     const { relation: r, remoteIndex, isIncoming, cardX, parentX, cardEndpoint, parentEndpoint } = descriptor;
     const startX = isIncoming ? cardX : parentX;
     const startY = isIncoming ? cardEndpoint.y : parentEndpoint.y;
