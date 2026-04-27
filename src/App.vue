@@ -1218,7 +1218,7 @@ function finiteNumberOr(value, fallback) {
 /**
  * Returns value when it is a string, otherwise returns fallback.
  */
-function importStringOr(value, fallback = '') {
+function stringOr(value, fallback = '') {
   return typeof value === 'string' ? value : fallback;
 }
 
@@ -1241,9 +1241,9 @@ function parseImportedGraph(raw) {
     nodeIds.add(node.id);
     importedNodes.push({
       ...node,
-      title: importStringOr(node.title),
-      bodyDelta: importStringOr(node.bodyDelta),
-      bodyHtml: importStringOr(node.bodyHtml),
+      title: stringOr(node.title),
+      bodyDelta: stringOr(node.bodyDelta),
+      bodyHtml: stringOr(node.bodyHtml),
       visits: finiteNumberOr(node.visits, 0),
       createdAt: finiteNumberOr(node.createdAt, importedAt),
       updatedAt: finiteNumberOr(node.updatedAt, importedAt),
@@ -1272,9 +1272,9 @@ function parseImportedGraph(raw) {
     edgeIds.add(edge.id);
     importedEdges.push({
       ...edge,
-      desc: importStringOr(edge.desc),
-      descDelta: importStringOr(edge.descDelta),
-      descHtml: importStringOr(edge.descHtml),
+      desc: stringOr(edge.desc),
+      descDelta: stringOr(edge.descDelta),
+      descHtml: stringOr(edge.descHtml),
       weight: finiteNumberOr(edge.weight, DEFAULT_EDGE_WEIGHT),
     });
   }
