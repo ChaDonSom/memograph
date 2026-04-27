@@ -704,9 +704,13 @@ const hop2Incoming = computed(() => {
       }
     }
   }
-  const ranked = results.sort((a, b) => b.score - a.score).slice(0, 8);
-  ranked.forEach(relation => { relation.ariaLabel = relationAriaLabel(relation); });
-  return ranked;
+  return results
+    .sort((a, b) => b.score - a.score)
+    .slice(0, 8)
+    .map(relation => ({
+      ...relation,
+      ariaLabel: relationAriaLabel(relation),
+    }));
 });
 
 const hop2Outgoing = computed(() => {
@@ -741,9 +745,13 @@ const hop2Outgoing = computed(() => {
       }
     }
   }
-  const ranked = results.sort((a, b) => b.score - a.score).slice(0, 8);
-  ranked.forEach(relation => { relation.ariaLabel = relationAriaLabel(relation); });
-  return ranked;
+  return results
+    .sort((a, b) => b.score - a.score)
+    .slice(0, 8)
+    .map(relation => ({
+      ...relation,
+      ariaLabel: relationAriaLabel(relation),
+    }));
 });
 
 function setRelationCardRef(edgeId, el) {
