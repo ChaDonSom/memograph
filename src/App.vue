@@ -81,7 +81,7 @@
               tabindex="0"
               @click="handleRelationCardClick($event, r)"
               @keydown.enter.prevent="loadNode(r.targetId)"
-              @keydown.space.prevent="loadNode(r.targetId)"
+              @keydown.space.prevent="showRelationPreview($event, r)"
               @mouseenter="showRelationPreview($event, r)"
               @mouseleave="hidePrev"
               @focusin="showRelationPreview($event, r)"
@@ -151,15 +151,15 @@
               tabindex="0"
               @click="handleRelationCardClick($event, r)"
               @keydown.enter.prevent="loadNode(r.targetId)"
-              @keydown.space.prevent="loadNode(r.targetId)"
+              @keydown.space.prevent="showRelationPreview($event, r)"
               @mouseenter="showRelationPreview($event, r)"
               @mouseleave="hidePrev"
               @focusin="showRelationPreview($event, r)"
               @focusout="hidePrev"
             >
               <div class="rel-dir">{{ r.dir }}</div>
-              <div class="rel-label-text rel-first-line">{{ r.firstLine }}</div>
               <div class="rel-title">{{ r.title }}</div>
+              <div class="rel-label-text rel-first-line">{{ r.firstLine }}</div>
               <div class="rel-foot">
                 <span class="rel-score">P={{ r.score.toFixed(1) }}</span>
                 <button class="rel-del" @click.stop="dropEdge(r.edgeId)" title="Remove relation">✕</button>
@@ -657,7 +657,7 @@ function truncateText(text = '', maxLength) {
   return text.length > maxLength ? `${text.slice(0, maxLength - 1).trimEnd()}…` : text;
 }
 
-function relationFirstLine(relationHtml, desc = '') {
+function extractRelationPreview(relationHtml, desc = '') {
   const richText = relationHtml ? richTextToPlainText(relationHtml) : '';
   const plainText = richText || desc.replace(/\r\n/g, '\n').split('\n')[0].trim() || '';
   return truncateText(plainText || 'Relationship', RELATION_CARD_FIRST_LINE_LENGTH);
@@ -702,7 +702,7 @@ const rankedRelations = computed(() => {
       relationHtml,
       dir,
       side,
-      firstLine: relationFirstLine(relationHtml, e.desc),
+      firstLine: extractRelationPreview(relationHtml, e.desc),
       score: pScore(e, t),
     });
   }
@@ -975,7 +975,7 @@ function showRelationPreview(evt, relation) {
   const y = Math.max(8, Math.min(rect.top, window.innerHeight - PREVIEW_HEIGHT_WITH_GUTTER));
   const fallbackText = [relation.label, relation.detail].filter(Boolean).join('\n\n') || relation.firstLine;
   prev.title = `${relation.dir}: ${relation.title}`;
-  prev.html = relation.relationHtml || `<p>${escapeHtml(fallbackText || 'No relationship description.')}</p>`;
+  prev.html = sanitizeRichHtml(relation.relationHtml || '') || `<p>${escapeHtml(fallbackText || 'No relationship description.')}</p>`;
   prev.x = x;
   prev.y = y;
   prev.on = true;
