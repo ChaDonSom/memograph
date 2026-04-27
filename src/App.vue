@@ -477,6 +477,7 @@ const HOP_INDENT_PX = 8;
 const CENTER_TRANSITION_NAME = 'page-center';
 const CARD_TRANSITION_NAME = 'page-card';
 const RELATION_CARD_TRANSITION_PREFIX = 'rel-card-';
+const ARROW_SEPARATOR = '\u2192';
 const REMOTE_CONNECTOR_LABEL_X_OFFSET = 8;
 const REMOTE_CONNECTOR_MIN_ARC = 46;
 const REMOTE_CONNECTOR_LANE_GAP = 9;
@@ -581,11 +582,11 @@ const modalDirectionLabel = computed(() => {
   if (modal.mode === 'edit' && modal.editFromId && modal.editToId) {
     const from = findNode(modal.editFromId);
     const to = findNode(modal.editToId);
-    if (from && to) return `${from.title || '(untitled)'} \u2192 ${to.title || '(untitled)'}`;
+    if (from && to) return `${from.title || '(untitled)'} ${ARROW_SEPARATOR} ${to.title || '(untitled)'}`;
   }
-  if (modal.dir === 'in') return 'Target \u2192 this page (incoming)';
+  if (modal.dir === 'in') return `Target ${ARROW_SEPARATOR} this page (incoming)`;
   if (modal.dir === 'bi') return 'Bidirectional';
-  return 'This page \u2192 target (outgoing)';
+  return `This page ${ARROW_SEPARATOR} target (outgoing)`;
 });
 
 function extractRelationLabel(relationHtml, desc = '') {
@@ -664,6 +665,7 @@ function remoteHopAttenuation(hop) {
 }
 
 function stableTransitionToken(value) {
+  // djb2 is sufficient here: it keeps generated view-transition names short and stable for local edge IDs.
   let hash = DJB2_HASH_INITIAL;
   for (let i = 0; i < value.length; i++) {
     hash = ((hash << 5) + hash) ^ value.charCodeAt(i);
@@ -877,6 +879,7 @@ function connectorPath(startX, startY, endX, endY) {
 }
 
 function remoteConnectorLaneX(isIncoming, endpointX, centerRect, canvasRect, laneIndex) {
+  // Distribute lanes around zero (-2..2) so adjacent remote arrows do not sit on the same track.
   const laneOffset = (laneIndex % REMOTE_CONNECTOR_MAX_LANES - REMOTE_CONNECTOR_LANE_CENTER_OFFSET) * REMOTE_CONNECTOR_LANE_GAP;
   if (isIncoming) {
     const whitespaceEdge = centerRect.left - canvasRect.left - REMOTE_CONNECTOR_LABEL_X_OFFSET;
@@ -1311,7 +1314,7 @@ function openRelationEditorAfterModalUpdate() {
 function openEditRelationModal(relation) {
   const edge = findEdge(relation.graphEdgeId || relation.edgeId);
   if (!edge) return;
-  const isCurrentRelation = edge && (edge.fromId === currentId.value || edge.toId === currentId.value);
+  const isCurrentRelation = edge.fromId === currentId.value || edge.toId === currentId.value;
   const targetId = isCurrentRelation
     ? relation.targetId
     : edge.toId;
