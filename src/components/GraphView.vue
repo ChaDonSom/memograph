@@ -53,10 +53,10 @@
       <div
         v-for="tile in visibleTiles"
         :key="tile.id"
-        role="link"
+        role="button"
         tabindex="0"
-        :aria-current="tile.isFocus ? 'page' : undefined"
-        :aria-label="`${tile.title}. ${tile.roleLabel}. Press Enter to focus this page.`"
+        :aria-pressed="tile.isFocus ? 'true' : 'false'"
+        :aria-label="`${tile.title}. ${tile.roleLabel}. Select page.`"
         class="memo-map-tile"
         :class="{
           'memo-map-tile--focus': tile.isFocus,
@@ -87,8 +87,8 @@
         </span>
         <span class="memo-map-tile-meta">{{ tile.meta }}</span>
         <span class="memo-map-tile-actions" @click.stop>
-          <button type="button" class="memo-map-action" @click="$emit('edit-page', tile.id)" @keydown.stop>Edit page</button>
-          <button type="button" class="memo-map-action memo-map-action--danger" @click="$emit('delete-page', tile.id)" @keydown.stop>Delete page</button>
+          <button type="button" class="memo-map-action" :aria-label="`Edit ${tile.title}`" @click="$emit('edit-page', tile.id)" @keydown.stop>Edit page</button>
+          <button type="button" class="memo-map-action memo-map-action--danger" :aria-label="`Delete ${tile.title}`" @click="$emit('delete-page', tile.id)" @keydown.stop>Delete page</button>
         </span>
       </div>
 
@@ -143,8 +143,8 @@ const activeNodeId = ref('');
 const activeEdgeId = ref('');
 let resizeObserver = null;
 
-const BASE_CONDUIT_GAP = 18;
-const CONDUIT_WIDTH_PER_ROUTE = 8;
+const BASE_CORRIDOR_GAP = 18;
+const CORRIDOR_WIDTH_PER_ROUTE = 8;
 const OUTER_PADDING = 18;
 const PERIMETER_ROUTE_LANE = 9;
 const MIN_SIDE_WIDTH = 150;
@@ -359,7 +359,11 @@ function treemapGroup(models, bounds) {
 }
 
 function corridorWidth(routeCount) {
-  return BASE_CONDUIT_GAP + routeCount * CONDUIT_WIDTH_PER_ROUTE;
+  return BASE_CORRIDOR_GAP + routeCount * CORRIDOR_WIDTH_PER_ROUTE;
+}
+
+function createCorridorLoadsArray(groupCount) {
+  return Array.from({ length: Math.max(0, groupCount - 1) }, () => 0);
 }
 
 function groupForNode(groupsByNodeId, nodeId) {
@@ -367,7 +371,7 @@ function groupForNode(groupsByNodeId, nodeId) {
 }
 
 function corridorLoadsForGroups(groups, groupsByNodeId) {
-  const loads = Array.from({ length: Math.max(0, groups.length - 1) }, () => 0);
+  const loads = createCorridorLoadsArray(groups.length);
   for (const edge of props.edges) {
     const from = groupForNode(groupsByNodeId, edge.fromId);
     const to = groupForNode(groupsByNodeId, edge.toId);
@@ -596,6 +600,10 @@ function laneXInCorridor(corridor, laneOffset) {
   );
 }
 
+function defaultMidX(endpoints) {
+  return (endpoints.startX + endpoints.endX) / 2;
+}
+
 function directRoutePath(points) {
   // Orthogonal route: move to source, cross the conduit horizontally, run vertically, then enter the target horizontally.
   return `M ${points.startX} ${points.startY} H ${points.midX} V ${points.endY} H ${points.endX}`;
@@ -633,7 +641,7 @@ const routedEdges = computed(() => {
       const corridor = adjacentCorridorBetween(from, to);
       const midX = corridor
         ? laneXInCorridor(corridor, endpoints.laneOffset)
-        : (endpoints.startX + endpoints.endX) / 2;
+        : defaultMidX(endpoints);
       points = { ...endpoints, midX };
       path = directRoutePath(points);
     } else if (groupDistance > 1) {

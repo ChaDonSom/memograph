@@ -959,7 +959,7 @@ body {
 
 .memo-map-action--danger {
   border-color: rgba(248,113,113,.28);
-  color: color-mix(in srgb, var(--danger) 82%, var(--muted));
+  color: var(--danger);
 }
 
 .memo-map-route-label {

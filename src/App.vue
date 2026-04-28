@@ -1648,11 +1648,12 @@ function deletePageFromGraph(id) {
 
 function graphRelationForEdge(edge) {
   const isCurrentRelation = edge.fromId === currentId.value || edge.toId === currentId.value;
-  const targetId = isCurrentRelation && edge.toId === currentId.value ? edge.fromId : edge.toId;
+  const isIncoming = isCurrentRelation && edge.toId === currentId.value;
+  const targetId = isIncoming ? edge.fromId : edge.toId;
   return {
     graphEdgeId: edge.id,
     targetId,
-    side: isCurrentRelation && edge.toId === currentId.value ? 'incoming' : 'outgoing',
+    side: isIncoming ? 'incoming' : 'outgoing',
   };
 }
 
