@@ -214,6 +214,8 @@ const ANGLE_SPREAD_CENTER = 2;
 const ANGLE_SPREAD_STEP = Math.PI / 10;
 const MAX_HOP_ANGLE_OFFSET = 2;
 const HOP_ANGLE_STEP = Math.PI / 14;
+const DEFAULT_MAP_HOP = 1;
+const HASH_INPUT_MAX_LENGTH = 96;
 const MIN_MAP_TILE_WIDTH = 150;
 const MIN_MAP_TILE_HEIGHT = 92;
 const MAX_MAP_TILE_HEIGHT = 180;
@@ -499,7 +501,7 @@ function relationAngle(model) {
 }
 
 function angleDistance(angleA, angleB) {
-  // Minimum circular distance after normalizing the difference into the [-π, π] range.
+  // Minimum circular distance after normalizing into [-π, π]; angleDistance(0, π) is π.
   const fullCircle = Math.PI * 2;
   const delta = Math.abs(((angleA - angleB + Math.PI) % fullCircle + fullCircle) % fullCircle - Math.PI);
   return delta;
@@ -511,7 +513,7 @@ function angleDistance(angleA, angleB) {
  */
 function hashValue(value) {
   let hash = 0;
-  for (const char of String(value)) hash = (hash * 31 + char.charCodeAt(0)) >>> 0;
+  for (const char of String(value).slice(0, HASH_INPUT_MAX_LENGTH)) hash = (hash * 31 + char.charCodeAt(0)) >>> 0;
   return hash;
 }
 
@@ -593,7 +595,7 @@ function cardRectForCell(model, cell, isFocus = false) {
 
 function assignMapCell(model, availableCells, usedCells) {
   const preferredAngle = relationAngle(model);
-  const targetRing = clamp(model.hop || 1, 1, MAP_MAX_HOP_RING);
+  const targetRing = clamp(model.hop || DEFAULT_MAP_HOP, 1, MAP_MAX_HOP_RING);
   let cell = null;
   for (const candidate of availableCells) {
     if (usedCells.has(`${candidate.col}:${candidate.row}`)) continue;
