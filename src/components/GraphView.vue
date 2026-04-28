@@ -821,20 +821,25 @@ const visibleEdges = computed(() => {
 
   return edges
     .map(edge => ({ edge, score: treemapEdgeRoutingScore(edge) }))
-    .sort((a, b) => b.score - a.score || a.edge.id.localeCompare(b.edge.id))
+    .sort((a, b) => b.score - a.score || (a.edge.id > b.edge.id ? 1 : -1))
     .slice(0, TREEMAP_MAX_ROUTED_EDGES)
     .map(({ edge }) => edge);
 });
 
-const toolbarSummary = computed(() => {
-  if (!isTreemapVariant.value) return `${visibleTiles.value.length} blocks · ${routedEdges.value.length} conduits`;
+const visibleTileCount = computed(() => visibleTiles.value.length);
+const routedEdgeCount = computed(() => routedEdges.value.length);
+const eligibleVisibleEdgeCount = computed(() => eligibleVisibleEdges.value.length);
+const totalNodeCount = computed(() => props.nodes.length);
 
-  const blocks = props.nodes.length > visibleTiles.value.length
-    ? `${visibleTiles.value.length} / ${props.nodes.length} blocks`
-    : `${visibleTiles.value.length} blocks`;
-  const conduits = eligibleVisibleEdges.value.length > routedEdges.value.length
-    ? `${routedEdges.value.length} / ${eligibleVisibleEdges.value.length} conduits`
-    : `${routedEdges.value.length} conduits`;
+const toolbarSummary = computed(() => {
+  if (!isTreemapVariant.value) return `${visibleTileCount.value} blocks · ${routedEdgeCount.value} conduits`;
+
+  const blocks = totalNodeCount.value > visibleTileCount.value
+    ? `${visibleTileCount.value} / ${totalNodeCount.value} blocks`
+    : `${visibleTileCount.value} blocks`;
+  const conduits = eligibleVisibleEdgeCount.value > routedEdgeCount.value
+    ? `${routedEdgeCount.value} / ${eligibleVisibleEdgeCount.value} conduits`
+    : `${routedEdgeCount.value} conduits`;
   return `${blocks} · ${conduits}`;
 });
 
