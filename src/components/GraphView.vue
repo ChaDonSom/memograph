@@ -206,6 +206,12 @@ const MAP_MIN_COLUMNS = 5;
 const MAP_MAX_COLUMNS = 7;
 const MAP_MIN_ROWS = 5;
 const MAP_MAX_ROWS = 7;
+const MAP_MAX_RING = Math.floor(Math.max(MAP_MAX_ROWS, MAP_MAX_COLUMNS) / 2);
+const ANGLE_SPREAD_BINS = 5;
+const ANGLE_SPREAD_CENTER = 2;
+const ANGLE_SPREAD_STEP = Math.PI / 10;
+const MAX_HOP_ANGLE_OFFSET = 2;
+const HOP_ANGLE_STEP = Math.PI / 14;
 const MIN_MAP_TILE_WIDTH = 150;
 const MIN_MAP_TILE_HEIGHT = 92;
 const MAX_MAP_TILE_HEIGHT = 180;
@@ -473,13 +479,14 @@ function mapRowCount(tileCount, columns) {
 function relationAngle(model) {
   if (model.node.id === props.currentId) return 0;
   const base = model.side === 'incoming' ? Math.PI : 0;
-  const spread = ((hashString(model.node.id) % 5) - 2) * (Math.PI / 10);
-  return base + spread + Math.min(2, Math.max(0, model.hop - 1)) * (Math.PI / 14);
+  const spread = ((hashString(model.node.id) % ANGLE_SPREAD_BINS) - ANGLE_SPREAD_CENTER) * ANGLE_SPREAD_STEP;
+  const hopOffset = Math.min(MAX_HOP_ANGLE_OFFSET, Math.max(0, model.hop - 1)) * HOP_ANGLE_STEP;
+  return base + spread + hopOffset;
 }
 
 function angleDistance(a, b) {
-  const full = Math.PI * 2;
-  const delta = Math.abs(((a - b + Math.PI) % full + full) % full - Math.PI);
+  const fullCircle = Math.PI * 2;
+  const delta = Math.abs(((a - b + Math.PI) % fullCircle + fullCircle) % fullCircle - Math.PI);
   return delta;
 }
 
@@ -555,7 +562,7 @@ function cardRectForCell(model, cell, isFocus = false) {
 
 function assignMapCell(model, availableCells, usedCells) {
   const preferredAngle = relationAngle(model);
-  const targetRing = clamp(model.hop || 1, 1, MAP_MAX_ROWS);
+  const targetRing = clamp(model.hop || 1, 1, MAP_MAX_RING);
   const cell = availableCells
     .filter(candidate => !usedCells.has(`${candidate.col}:${candidate.row}`))
     .sort((a, b) =>
