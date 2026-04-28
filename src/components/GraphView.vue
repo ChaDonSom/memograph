@@ -6,7 +6,7 @@
         <h2>{{ viewTitle }}</h2>
       </div>
       <div class="memo-graph-toolbar-summary">
-        {{ visibleTiles.length }} blocks · {{ routedEdges.length }} conduits
+        {{ toolbarSummary }}
       </div>
       <div class="memo-graph-toolbar-actions">
         <button class="btn btn-ghost" @click="$emit('add-relation')">+ Add relation</button>
@@ -250,6 +250,8 @@ const PERIMETER_ROUTE_LANE = 12;
 const MIN_SIDE_WIDTH = 150;
 const MIN_FOCUS_WIDTH = 210;
 const MAX_VISIBLE_TILES = 28;
+const TREEMAP_MAX_VISIBLE_TILES = 48;
+const TREEMAP_MAX_ROUTED_EDGES = 96;
 const FOCUS_MIN_SCORE = 36;
 const HOP_DECAY = 0.58;
 const CONTENT_SCORE_CAP = 12;
@@ -455,30 +457,54 @@ function focusedPScore(node) {
   if (!distance) return 0;
   if (node.id === props.currentId) return FOCUS_MIN_SCORE;
 
+  const scoreParts = nodeScoreParts(node);
+  const directEdgeScore = distance.relationWeight * 2.6;
+
+  return (directEdgeScore
+    + scoreParts.contentScore
+    + scoreParts.richnessScore
+    + scoreParts.visitScore
+    + scoreParts.degreeScore
+    + scoreParts.existingPScore)
+    * Math.pow(HOP_DECAY, Math.max(0, distance.hop - 1));
+}
+
+function nodeScoreParts(node) {
   const stats = degreeStats.value.get(node.id) || { incoming: 0, outgoing: 0, weight: 0 };
   const content = nodeContentStats.value.get(node.id) || { plainText: '', richness: 0 };
-  const contentLength = content.plainText.length;
-  const contentScore = clamp(Math.log2(contentLength + 1) * 1.45, 0, CONTENT_SCORE_CAP);
-  const richnessScore = content.richness;
-  const visitScore = Math.log2((node.visits || 0) + 1) * 1.8;
-  const degreeScore = Math.log2(stats.incoming + stats.outgoing + 1) * 3;
-  const directEdgeScore = distance.relationWeight * 2.6;
-  const existingPScore = bestExistingPScores.value.get(node.id) || 0;
+  const contentScore = clamp(Math.log2(content.plainText.length + 1) * 1.45, 0, CONTENT_SCORE_CAP);
+  return {
+    stats,
+    contentScore,
+    richnessScore: content.richness,
+    visitScore: Math.log2((node.visits || 0) + 1) * 1.8,
+    degreeScore: Math.log2(stats.incoming + stats.outgoing + 1) * 3,
+    existingPScore: bestExistingPScores.value.get(node.id) || 0,
+  };
+}
 
-  return (directEdgeScore + contentScore + richnessScore + visitScore + degreeScore + existingPScore)
-    * Math.pow(HOP_DECAY, Math.max(0, distance.hop - 1));
+function capTreemapModels(models) {
+  if (models.length <= TREEMAP_MAX_VISIBLE_TILES) return models;
+
+  const capped = models.slice(0, TREEMAP_MAX_VISIBLE_TILES);
+  if (props.currentId && !capped.some(model => model.node.id === props.currentId)) {
+    const current = models.find(model => model.node.id === props.currentId);
+    if (current) capped[capped.length - 1] = current;
+  }
+
+  return capped.sort((a, b) => b.score - a.score || (b.node.updatedAt || 0) - (a.node.updatedAt || 0));
 }
 
 const visibleNodeModels = computed(() => {
   if (isTreemapVariant.value) {
-    return props.nodes
+    return capTreemapModels(props.nodes
       .map(node => ({
         node,
         hop: node.id === props.currentId ? 0 : 1,
         side: 'treemap',
         score: treemapPScore(node),
       }))
-      .sort((a, b) => b.score - a.score || (b.node.updatedAt || 0) - (a.node.updatedAt || 0));
+      .sort((a, b) => b.score - a.score || (b.node.updatedAt || 0) - (a.node.updatedAt || 0)));
   }
 
   const models = props.nodes
@@ -516,14 +542,14 @@ const visibleNodeModels = computed(() => {
 });
 
 function treemapPScore(node) {
-  const stats = degreeStats.value.get(node.id) || { incoming: 0, outgoing: 0, weight: 0 };
-  const content = nodeContentStats.value.get(node.id) || { plainText: '', richness: 0 };
-  const contentLength = content.plainText.length;
-  const contentScore = clamp(Math.log2(contentLength + 1) * 1.45, 0, CONTENT_SCORE_CAP);
-  const visitScore = Math.log2((node.visits || 0) + 1) * 1.8;
-  const degreeScore = Math.log2(stats.incoming + stats.outgoing + 1) * 3 + stats.weight * 0.9;
-  const existingPScore = bestExistingPScores.value.get(node.id) || 0;
-  const baseScore = 6 + contentScore + content.richness + visitScore + degreeScore + existingPScore;
+  const scoreParts = nodeScoreParts(node);
+  const baseScore = 6
+    + scoreParts.contentScore
+    + scoreParts.richnessScore
+    + scoreParts.visitScore
+    + scoreParts.degreeScore
+    + scoreParts.stats.weight * 0.9
+    + scoreParts.existingPScore;
   return node.id === props.currentId ? baseScore * TREEMAP_CURRENT_SCORE_BOOST_RATIO : baseScore;
 }
 
@@ -773,10 +799,44 @@ const tileRects = computed(() =>
   new Map(visibleTiles.value.map(tile => [tile.id, tile.rect]))
 );
 
-const visibleEdges = computed(() =>
+const eligibleVisibleEdges = computed(() =>
   props.edges
     .filter(edge => tileRects.value.has(edge.fromId) && tileRects.value.has(edge.toId))
 );
+
+function treemapEdgeRoutingScore(edge) {
+  const touchesCurrent = edge.fromId === props.currentId || edge.toId === props.currentId;
+  const from = nodesById.value.get(edge.fromId);
+  const to = nodesById.value.get(edge.toId);
+  const fromScore = from ? treemapPScore(from) : 0;
+  const toScore = to ? treemapPScore(to) : 0;
+  return (touchesCurrent ? 1000 : 0)
+    + (edge.weight || DEFAULT_EDGE_WEIGHT) * 10
+    + Math.max(fromScore, toScore);
+}
+
+const visibleEdges = computed(() => {
+  const edges = eligibleVisibleEdges.value;
+  if (!isTreemapVariant.value || edges.length <= TREEMAP_MAX_ROUTED_EDGES) return edges;
+
+  return edges
+    .map(edge => ({ edge, score: treemapEdgeRoutingScore(edge) }))
+    .sort((a, b) => b.score - a.score || a.edge.id.localeCompare(b.edge.id))
+    .slice(0, TREEMAP_MAX_ROUTED_EDGES)
+    .map(({ edge }) => edge);
+});
+
+const toolbarSummary = computed(() => {
+  if (!isTreemapVariant.value) return `${visibleTiles.value.length} blocks · ${routedEdges.value.length} conduits`;
+
+  const blocks = props.nodes.length > visibleTiles.value.length
+    ? `${visibleTiles.value.length} / ${props.nodes.length} blocks`
+    : `${visibleTiles.value.length} blocks`;
+  const conduits = eligibleVisibleEdges.value.length > routedEdges.value.length
+    ? `${routedEdges.value.length} / ${eligibleVisibleEdges.value.length} conduits`
+    : `${routedEdges.value.length} conduits`;
+  return `${blocks} · ${conduits}`;
+});
 
 function rectCenter(rect) {
   return {
