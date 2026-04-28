@@ -444,7 +444,7 @@ const visibleNodeModels = computed(() => {
 });
 
 function groupWeight(group) {
-  return Math.max(1, Math.sqrt(group.value || 1));
+  return Math.max(1, Math.sqrt(Number.isFinite(group.value) ? group.value : 1));
 }
 
 function groupMinWidth(group, availableWidth) {
@@ -527,9 +527,13 @@ function allocateStackHeights(models, availableHeight) {
   return heights;
 }
 
+function modelStackComparator(a, b) {
+  return a.hop - b.hop || b.score - a.score || a.node.id.localeCompare(b.node.id);
+}
+
 function stackGroup(group, bounds) {
   if (!group.models.length || bounds.width <= 0 || bounds.height <= 0) return [];
-  const models = [...group.models].sort((a, b) => a.hop - b.hop || b.score - a.score || a.node.id.localeCompare(b.node.id));
+  const models = [...group.models].sort(modelStackComparator);
 
   if (group.key === 'focus') {
     const focus = models[0];
@@ -538,6 +542,7 @@ function stackGroup(group, bounds) {
       ...focus,
       groupKey: group.key,
       groupIndex: group.index,
+      // Preserve the column bounds separately from the card bounds for local loop routing.
       groupX: bounds.x,
       groupWidth: bounds.width,
       x: bounds.x,
@@ -555,6 +560,7 @@ function stackGroup(group, bounds) {
       ...model,
       groupKey: group.key,
       groupIndex: group.index,
+      // Preserve the column bounds separately from the card bounds for local loop routing.
       groupX: bounds.x,
       groupWidth: bounds.width,
       x: bounds.x,
@@ -724,9 +730,11 @@ function laneCoordinate(corridor, index, count) {
 }
 
 function localLoopX(rect, laneIndex, side) {
+  const groupX = Number.isFinite(rect.groupX) ? rect.groupX : rect.x;
+  const groupWidth = Number.isFinite(rect.groupWidth) ? rect.groupWidth : rect.width;
   const offset = LOCAL_LOOP_GAP + laneIndex * LANE_STEP;
-  if (side === 'left') return clamp(rect.groupX - offset, ROUTE_EDGE_PADDING, stageSize.width - ROUTE_EDGE_PADDING);
-  return clamp(rect.groupX + rect.groupWidth + offset, ROUTE_EDGE_PADDING, stageSize.width - ROUTE_EDGE_PADDING);
+  if (side === 'left') return clamp(groupX - offset, ROUTE_EDGE_PADDING, stageSize.width - ROUTE_EDGE_PADDING);
+  return clamp(groupX + groupWidth + offset, ROUTE_EDGE_PADDING, stageSize.width - ROUTE_EDGE_PADDING);
 }
 
 function perimeterLaneY(index, start, end) {
@@ -769,6 +777,12 @@ function roundedOrthogonalPath(points) {
 function labelRotation(vertical, startY, endY) {
   if (!vertical) return 0;
   return endY < startY ? -90 : 90;
+}
+
+function planYMidpointComparator(a, b) {
+  return (rectCenter(a.from).y + rectCenter(a.to).y)
+    - (rectCenter(b.from).y + rectCenter(b.to).y)
+    || a.edge.id.localeCompare(b.edge.id);
 }
 
 const routedEdges = computed(() => {
@@ -826,18 +840,18 @@ const routedEdges = computed(() => {
 
   for (const [key, group] of corridorLaneGroups) {
     group
-      .sort((a, b) => (rectCenter(a.from).y + rectCenter(a.to).y) - (rectCenter(b.from).y + rectCenter(b.to).y) || a.edge.id.localeCompare(b.edge.id))
+      .sort(planYMidpointComparator)
       .forEach((plan, index) => corridorLaneIndexes.set(`${plan.edge.id}:${key}`, { index, count: group.length }));
   }
 
   for (const group of localLaneGroups.values()) {
     group
-      .sort((a, b) => (rectCenter(a.from).y + rectCenter(a.to).y) - (rectCenter(b.from).y + rectCenter(b.to).y) || a.edge.id.localeCompare(b.edge.id))
+      .sort(planYMidpointComparator)
       .forEach((plan, index) => localLaneIndexes.set(plan.edge.id, index));
   }
 
   perimeterPlans
-    .sort((a, b) => (rectCenter(a.from).y + rectCenter(a.to).y) - (rectCenter(b.from).y + rectCenter(b.to).y) || a.edge.id.localeCompare(b.edge.id))
+    .sort(planYMidpointComparator)
     .forEach((plan, index) => perimeterLaneIndexes.set(plan.edge.id, index));
 
   return plans.map(plan => {
