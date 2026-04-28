@@ -2,84 +2,99 @@
   <div class="memo-graph-view">
     <div class="memo-graph-toolbar">
       <div>
-        <div class="memo-graph-kicker">Graph preview</div>
-        <h2>Ilograph-style relationship map</h2>
+        <div class="memo-graph-kicker">Bounded block map</div>
+        <h2>Focused relationship masonry</h2>
+      </div>
+      <div class="memo-graph-toolbar-summary">
+        {{ visibleTiles.length }} blocks · {{ routedEdges.length }} conduits
       </div>
       <div class="memo-graph-toolbar-actions">
         <button class="btn btn-ghost" @click="$emit('add-relation')">+ Add relation</button>
-        <button class="btn btn-ghost" @click="fitGraph">Fit</button>
       </div>
     </div>
 
-    <VueFlow
-      v-model:nodes="flowNodes"
-      v-model:edges="flowEdges"
-      class="memo-graph-flow"
-      :default-viewport="{ zoom: 0.82, x: 80, y: 60 }"
-      :min-zoom="0.18"
-      :max-zoom="1.35"
-      :fit-view-on-init="true"
-      :nodes-draggable="true"
-      :nodes-connectable="false"
-      :elements-selectable="true"
-      @node-click="handleNodeClick"
-    >
-      <template #node-memoPage="{ data }">
-        <div
-          class="memo-graph-node"
-          :class="{
-            'memo-graph-node--current': data.isCurrent,
-            'memo-graph-node--remote': data.isRemote,
-          }"
-          :style="{ '--memo-importance': data.importanceRatio }"
-        >
-          <Handle
-            v-for="handle in data.handles"
-            :key="`target-${handle.id}`"
-            type="target"
-            :id="`target-${handle.id}`"
-            :position="Position.Left"
-            class="memo-graph-handle memo-graph-handle--left"
-            :style="{ top: handle.top }"
-          />
-          <Handle
-            v-for="handle in data.handles"
-            :key="`source-${handle.id}`"
-            type="source"
-            :id="`source-${handle.id}`"
-            :position="Position.Right"
-            class="memo-graph-handle memo-graph-handle--right"
-            :style="{ top: handle.top }"
-          />
-          <div class="memo-graph-node-topline">
-            <span>{{ data.roleLabel }}</span>
-            <span class="memo-graph-node-score">P={{ data.scoreLabel }}</span>
-          </div>
-          <div class="memo-graph-node-title">{{ data.title }}</div>
-          <div
-            v-if="data.bodyHtml"
-            class="memo-graph-node-body rel-rich"
-            v-html="data.bodyHtml"
-          ></div>
-          <div v-else class="memo-graph-node-body memo-graph-node-body--empty">
-            No page details yet.
-          </div>
-          <div class="memo-graph-node-meta">{{ data.meta }}</div>
-        </div>
-      </template>
+    <div ref="stageEl" class="memo-map-stage">
+      <svg
+        class="memo-map-routes"
+        :width="stageSize.width"
+        :height="stageSize.height"
+        :viewBox="`0 0 ${stageSize.width} ${stageSize.height}`"
+        aria-hidden="true"
+      >
+        <defs>
+          <marker
+            id="memo-map-arrowhead"
+            markerWidth="9"
+            markerHeight="9"
+            refX="8"
+            refY="4.5"
+            orient="auto"
+            markerUnits="strokeWidth"
+          >
+            <path d="M 0 0 L 9 4.5 L 0 9 z" fill="var(--accent)" />
+          </marker>
+        </defs>
+        <path
+          v-for="route in routedEdges"
+          :key="route.id"
+          class="memo-map-route"
+          :class="{ 'memo-map-route--focused': route.touchesFocus }"
+          :d="route.path"
+          :style="{ strokeWidth: route.strokeWidth }"
+          marker-end="url(#memo-map-arrowhead)"
+        />
+      </svg>
 
-      <template #edge-memoRelation="edgeProps">
-        <GraphRelationEdge v-bind="edgeProps" />
-      </template>
-    </VueFlow>
+      <button
+        v-for="tile in visibleTiles"
+        :key="tile.id"
+        type="button"
+        class="memo-map-tile"
+        :class="{
+          'memo-map-tile--focus': tile.isFocus,
+          'memo-map-tile--remote': tile.hop > 1,
+        }"
+        :style="tile.style"
+        @click="handleTileClick(tile)"
+      >
+        <span class="memo-map-tile-topline">
+          <span>{{ tile.roleLabel }}</span>
+          <span>P={{ tile.scoreLabel }}</span>
+        </span>
+        <span class="memo-map-tile-title">{{ tile.title }}</span>
+        <span
+          v-if="tile.bodyHtml"
+          class="memo-map-tile-body rel-rich"
+          v-html="tile.bodyHtml"
+        ></span>
+        <span v-else class="memo-map-tile-body memo-map-tile-body--empty">
+          No page details yet.
+        </span>
+        <span class="memo-map-tile-meta">{{ tile.meta }}</span>
+      </button>
+
+      <div
+        v-for="label in routeLabels"
+        :key="label.id"
+        class="memo-map-route-label"
+        :class="{ 'memo-map-route-label--vertical': label.vertical }"
+        :style="label.style"
+      >
+        <button type="button" class="memo-map-route-label-button">
+          {{ label.label }}
+        </button>
+        <div class="memo-map-route-popover">
+          <div class="memo-map-route-popover-title">{{ label.label }}</div>
+          <div class="memo-map-route-popover-body" v-html="label.bodyHtml"></div>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
 <script setup>
-import { computed, nextTick, ref, watch } from 'vue';
-import ELK from 'elkjs/lib/elk.bundled.js';
-import { Handle, MarkerType, Position, VueFlow, useVueFlow } from '@vue-flow/core';
-import GraphRelationEdge from './GraphRelationEdge.vue';
+import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue';
+import { hierarchy, treemap, treemapSquarify } from 'd3-hierarchy';
 import { DEFAULT_EDGE_WEIGHT, pScore, timeAgo } from '../utils/scoring.js';
 import { normalizeEditorHtml, sanitizeRichHtml } from '../utils/sanitize.js';
 import { richTextFirstLine, richTextToPlainText, truncateText } from '../utils/text.js';
@@ -92,33 +107,50 @@ const props = defineProps({
 
 const emit = defineEmits(['navigate', 'add-relation']);
 
-const elk = new ELK();
-const flowNodes = ref([]);
-const flowEdges = ref([]);
-const { fitView } = useVueFlow();
+const stageEl = ref(null);
+const stageSize = reactive({ width: 0, height: 0 });
+let resizeObserver = null;
 
-const PAGE_WIDTH_MIN = 190;
-const PAGE_WIDTH_RANGE = 120;
-const PAGE_HEIGHT_MIN = 118;
-const PAGE_HEIGHT_RANGE = 98;
-const HANDLE_COUNT = 7;
-const LAYOUT_PADDING = 56;
-// Outgoing/source pages should stay visible without out-sizing destination pages ranked by pScore.
-const FROM_NODE_SCORE_MULTIPLIER = 0.82;
-// Keep the focused page visually dominant even before it has many visits or weighted relations.
-const CURRENT_NODE_MIN_SCORE = 34;
+const CONDUIT_GAP = 18;
+const OUTER_PADDING = 10;
+const MIN_SIDE_WIDTH = 150;
+const MIN_FOCUS_WIDTH = 210;
+const MAX_VISIBLE_TILES = 28;
+const FOCUS_MIN_SCORE = 36;
+const HOP_DECAY = 0.58;
+const CONTENT_SCORE_CAP = 12;
+const RICHNESS_SCORE_CAP = 10;
+const ENDPOINT_STEP = 12;
 
 function clamp(value, min, max) {
   return Math.min(max, Math.max(min, value));
+}
+
+function escapeText(value) {
+  return String(value)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
 }
 
 function nodeBodyHtml(node) {
   return sanitizeRichHtml(normalizeEditorHtml(node.bodyHtml || ''));
 }
 
-function pagePlainText(node) {
+function nodePlainText(node) {
   const html = nodeBodyHtml(node);
   return richTextToPlainText(html) || (/<img\s[^>]*>|<img>/i.test(html) ? 'Image-only page.' : '');
+}
+
+function nodeRichness(node) {
+  const html = nodeBodyHtml(node);
+  const imageScore = (html.match(/<img\b/gi)?.length || 0) * 4;
+  const headingScore = (html.match(/<h[1-6]\b/gi)?.length || 0) * 1.6;
+  const listScore = (html.match(/<(ul|ol|li)\b/gi)?.length || 0) * 0.7;
+  const emphasisScore = (html.match(/<(strong|em|blockquote|pre|a)\b/gi)?.length || 0) * 0.8;
+  return clamp(imageScore + headingScore + listScore + emphasisScore, 0, RICHNESS_SCORE_CAP);
 }
 
 function relationLabel(edge) {
@@ -132,212 +164,338 @@ function relationBodyHtml(edge) {
   return `<p>${edge.desc ? escapeText(edge.desc) : 'No relationship details yet.'}</p>`;
 }
 
-function escapeText(value) {
-  return String(value)
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#39;');
-}
+const nodesById = computed(() =>
+  new Map(props.nodes.map(node => [node.id, node]))
+);
 
-const nodeScores = computed(() => {
-  const scores = new Map(props.nodes.map(node => [node.id, 0]));
-  const byId = new Map(props.nodes.map(node => [node.id, node]));
+const degreeStats = computed(() => {
+  const stats = new Map(props.nodes.map(node => [node.id, { incoming: 0, outgoing: 0, weight: 0 }]));
   for (const edge of props.edges) {
-    const from = byId.get(edge.fromId);
-    const to = byId.get(edge.toId);
-    if (to) scores.set(to.id, Math.max(scores.get(to.id) || 0, pScore(edge, to)));
-    if (from) scores.set(from.id, Math.max(scores.get(from.id) || 0, pScore(edge, from) * FROM_NODE_SCORE_MULTIPLIER));
+    stats.get(edge.fromId).outgoing++;
+    stats.get(edge.fromId).weight += edge.weight || DEFAULT_EDGE_WEIGHT;
+    stats.get(edge.toId).incoming++;
+    stats.get(edge.toId).weight += edge.weight || DEFAULT_EDGE_WEIGHT;
   }
-  for (const node of props.nodes) {
-    const visitBoost = Math.log2((node.visits || 0) + 1) * 2;
-    scores.set(node.id, Math.max(scores.get(node.id) || 0, visitBoost + DEFAULT_EDGE_WEIGHT));
-  }
-  if (props.currentId) scores.set(props.currentId, Math.max(scores.get(props.currentId) || 0, CURRENT_NODE_MIN_SCORE));
-  return scores;
+  return stats;
 });
 
-const scoreRange = computed(() => {
-  const values = [...nodeScores.value.values()];
-  return {
-    min: Math.min(...values, DEFAULT_EDGE_WEIGHT),
-    max: Math.max(...values, DEFAULT_EDGE_WEIGHT + 1),
-  };
+const focusedDistances = computed(() => {
+  const currentId = props.currentId;
+  if (!currentId) return new Map();
+  const distances = new Map([[currentId, { hop: 0, side: 'focus', relationWeight: DEFAULT_EDGE_WEIGHT }]]);
+  const queue = [currentId];
+  for (let i = 0; i < queue.length; i++) {
+    const nodeId = queue[i];
+    const current = distances.get(nodeId);
+    for (const edge of props.edges) {
+      let nextId = '';
+      let side = current.side;
+      if (edge.fromId === nodeId) {
+        nextId = edge.toId;
+        if (current.hop === 0) side = 'outgoing';
+      } else if (edge.toId === nodeId) {
+        nextId = edge.fromId;
+        if (current.hop === 0) side = 'incoming';
+      }
+      if (!nextId || distances.has(nextId)) continue;
+      distances.set(nextId, {
+        hop: current.hop + 1,
+        side,
+        relationWeight: edge.weight || DEFAULT_EDGE_WEIGHT,
+      });
+      queue.push(nextId);
+    }
+  }
+  return distances;
 });
 
-function importanceRatio(nodeId) {
-  const { min, max } = scoreRange.value;
-  return clamp(((nodeScores.value.get(nodeId) || min) - min) / Math.max(1, max - min), 0, 1);
+function focusedPScore(node) {
+  const distance = focusedDistances.value.get(node.id);
+  if (!distance) return 0;
+  if (node.id === props.currentId) return FOCUS_MIN_SCORE;
+
+  const stats = degreeStats.value.get(node.id) || { incoming: 0, outgoing: 0, weight: 0 };
+  const contentLength = nodePlainText(node).length;
+  const contentScore = clamp(Math.log2(contentLength + 1) * 1.45, 0, CONTENT_SCORE_CAP);
+  const richnessScore = nodeRichness(node);
+  const visitScore = Math.log2((node.visits || 0) + 1) * 1.8;
+  const degreeScore = Math.log2(stats.incoming + stats.outgoing + 1) * 3;
+  const directEdgeScore = distance.relationWeight * 2.6;
+  const existingPScore = props.edges
+    .filter(edge => edge.fromId === node.id || edge.toId === node.id)
+    .reduce((best, edge) => Math.max(best, pScore(edge, node) * 0.35), 0);
+
+  return (directEdgeScore + contentScore + richnessScore + visitScore + degreeScore + existingPScore)
+    * Math.pow(HOP_DECAY, Math.max(0, distance.hop - 1));
 }
 
-function graphNodeDimensions(nodeId) {
-  const ratio = importanceRatio(nodeId);
-  return {
-    width: Math.round(PAGE_WIDTH_MIN + ratio * PAGE_WIDTH_RANGE),
-    height: Math.round(PAGE_HEIGHT_MIN + ratio * PAGE_HEIGHT_RANGE),
-  };
-}
-
-function nodeRoleLabel(nodeId) {
-  if (nodeId === props.currentId) return 'Focused page';
-  const incoming = props.edges.some(edge => edge.toId === nodeId && edge.fromId === props.currentId);
-  const outgoing = props.edges.some(edge => edge.fromId === nodeId && edge.toId === props.currentId);
-  if (incoming && outgoing) return 'Bidirectional';
-  if (incoming) return 'Incoming';
-  if (outgoing) return 'Outgoing';
-  return 'Related page';
-}
-
-function handleLane(index) {
-  return index % HANDLE_COUNT;
-}
-
-function handleOffset(lane) {
-  return `${18 + lane * (64 / (HANDLE_COUNT - 1))}%`;
-}
-
-function parallelIndex(edge, allEdges) {
-  const siblings = allEdges.filter(item =>
-    item.fromId === edge.fromId
-    && item.toId === edge.toId
-  );
-  return Math.max(0, siblings.findIndex(item => item.id === edge.id));
-}
-
-function nodeData(node) {
-  const ratio = importanceRatio(node.id);
-  const bodyHtml = nodeBodyHtml(node);
-  return {
-    title: node.title || '(untitled)',
-    roleLabel: nodeRoleLabel(node.id),
-    isCurrent: node.id === props.currentId,
-    isRemote: node.id !== props.currentId && !props.edges.some(edge =>
-      (edge.fromId === props.currentId && edge.toId === node.id)
-      || (edge.toId === props.currentId && edge.fromId === node.id)
-    ),
-    importanceRatio: ratio.toFixed(3),
-    scoreLabel: (nodeScores.value.get(node.id) || 0).toFixed(1),
-    bodyHtml,
-    excerpt: truncateText(pagePlainText(node), 170),
-    meta: `Edited ${timeAgo(node.updatedAt)} · ${node.visits || 0} visit${node.visits === 1 ? '' : 's'}`,
-    handles: Array.from({ length: HANDLE_COUNT }, (_, id) => ({ id, top: handleOffset(id) })),
-  };
-}
-
-function buildElkGraph() {
-  return {
-    id: 'memograph',
-    layoutOptions: {
-      'elk.algorithm': 'layered',
-      'elk.direction': 'RIGHT',
-      'elk.spacing.nodeNode': '34',
-      'elk.layered.spacing.nodeNodeBetweenLayers': '96',
-      'elk.layered.spacing.edgeNodeBetweenLayers': '42',
-      'elk.layered.spacing.edgeEdgeBetweenLayers': '20',
-      'elk.edgeRouting': 'ORTHOGONAL',
-      'elk.layered.nodePlacement.strategy': 'BRANDES_KOEPF',
-      'elk.layered.considerModelOrder.strategy': 'NODES_AND_EDGES',
-      'elk.padding': `[top=${LAYOUT_PADDING},left=${LAYOUT_PADDING},bottom=${LAYOUT_PADDING},right=${LAYOUT_PADDING}]`,
-    },
-    children: props.nodes.map(node => ({
-      id: node.id,
-      ...graphNodeDimensions(node.id),
-    })),
-    edges: props.edges.map(edge => {
-      const lane = handleLane(parallelIndex(edge, props.edges));
+const visibleNodeModels = computed(() => {
+  const models = props.nodes
+    .map(node => {
+      const distance = focusedDistances.value.get(node.id);
       return {
-        id: edge.id,
-        sources: [edge.fromId],
-        targets: [edge.toId],
-        labels: [{ text: relationLabel(edge), width: 122, height: 28 }],
-        layoutOptions: {
-          'elk.sourcePort': `source-${lane}`,
-          'elk.targetPort': `target-${lane}`,
-        },
+        node,
+        hop: distance?.hop ?? Number.POSITIVE_INFINITY,
+        side: distance?.side ?? 'remote',
+        score: focusedPScore(node),
       };
-    }),
+    })
+    .filter(model => model.node.id === props.currentId || model.score > 0)
+    .sort((a, b) => {
+      if (a.node.id === props.currentId) return -1;
+      if (b.node.id === props.currentId) return 1;
+      return a.hop - b.hop || b.score - a.score;
+    })
+    .slice(0, MAX_VISIBLE_TILES);
+
+  if (models.length <= 3 && models.length > 1) {
+    const averageRelatedScore = models
+      .filter(model => model.node.id !== props.currentId)
+      .reduce((sum, model) => sum + model.score, 0) / (models.length - 1);
+    const focus = models.find(model => model.node.id === props.currentId);
+    if (focus) focus.score = Math.max(averageRelatedScore * 1.08, FOCUS_MIN_SCORE * 0.72);
+  }
+
+  return models;
+});
+
+function treemapGroup(models, bounds) {
+  if (!models.length || bounds.width <= 0 || bounds.height <= 0) return [];
+  const root = hierarchy({
+    children: models.map(model => ({
+      ...model,
+      value: Math.max(1, model.score),
+    })),
+  }).sum(item => item.value || 0);
+
+  treemap()
+    .tile(treemapSquarify.ratio(1.18))
+    .size([bounds.width, bounds.height])
+    .paddingInner(CONDUIT_GAP)
+    .round(true)(root);
+
+  return root.leaves().map(leaf => ({
+    ...leaf.data,
+    x: bounds.x + leaf.x0,
+    y: bounds.y + leaf.y0,
+    width: Math.max(1, leaf.x1 - leaf.x0),
+    height: Math.max(1, leaf.y1 - leaf.y0),
+  }));
+}
+
+const layoutModels = computed(() => {
+  const width = stageSize.width - OUTER_PADDING * 2;
+  const height = stageSize.height - OUTER_PADDING * 2;
+  if (width <= 0 || height <= 0) return [];
+
+  const models = visibleNodeModels.value;
+  const focus = models.find(model => model.node.id === props.currentId);
+  if (!focus) return [];
+
+  const incoming = models.filter(model => model.node.id !== props.currentId && model.side === 'incoming');
+  const outgoing = models.filter(model => model.node.id !== props.currentId && model.side !== 'incoming');
+  const groups = [
+    { key: 'incoming', models: incoming, value: incoming.reduce((sum, model) => sum + model.score, 0) },
+    { key: 'focus', models: [focus], value: focus.score },
+    { key: 'outgoing', models: outgoing, value: outgoing.reduce((sum, model) => sum + model.score, 0) },
+  ].filter(group => group.models.length);
+
+  const gapTotal = CONDUIT_GAP * Math.max(0, groups.length - 1);
+  const availableWidth = width - gapTotal;
+  const totalValue = groups.reduce((sum, group) => sum + Math.max(1, group.value), 0);
+  const minWidths = new Map(groups.map(group => [
+    group.key,
+    group.key === 'focus' ? Math.min(MIN_FOCUS_WIDTH, availableWidth) : Math.min(MIN_SIDE_WIDTH, availableWidth),
+  ]));
+  let remainingWidth = availableWidth;
+  let remainingValue = totalValue;
+  const widths = new Map();
+
+  for (const group of groups) {
+    const minWidth = minWidths.get(group.key);
+    const idealWidth = availableWidth * (Math.max(1, group.value) / totalValue);
+    if (idealWidth < minWidth && groups.length > 1) {
+      widths.set(group.key, minWidth);
+      remainingWidth -= minWidth;
+      remainingValue -= Math.max(1, group.value);
+    }
+  }
+
+  for (const group of groups) {
+    if (widths.has(group.key)) continue;
+    const widthShare = remainingValue > 0
+      ? remainingWidth * (Math.max(1, group.value) / remainingValue)
+      : remainingWidth / groups.length;
+    widths.set(group.key, Math.max(1, widthShare));
+  }
+
+  let x = OUTER_PADDING;
+  const laidOut = [];
+  for (const group of groups) {
+    const groupWidth = widths.get(group.key);
+    if (group.key === 'focus') {
+      laidOut.push({
+        ...focus,
+        x,
+        y: OUTER_PADDING,
+        width: groupWidth,
+        height,
+      });
+    } else {
+      laidOut.push(...treemapGroup(group.models, {
+        x,
+        y: OUTER_PADDING,
+        width: groupWidth,
+        height,
+      }));
+    }
+    x += groupWidth + CONDUIT_GAP;
+  }
+
+  return laidOut;
+});
+
+function roleLabel(model) {
+  if (model.node.id === props.currentId) return 'Focused page';
+  if (model.hop > 1) return `${model.hop} hops ${model.side === 'incoming' ? 'in' : 'out'}`;
+  return model.side === 'incoming' ? 'Incoming' : 'Outgoing';
+}
+
+const visibleTiles = computed(() =>
+  layoutModels.value.map(model => {
+    const areaRatio = clamp((model.width * model.height) / Math.max(1, stageSize.width * stageSize.height), 0, 1);
+    const fontSize = clamp(10 + Math.sqrt(areaRatio) * 24, 10, model.node.id === props.currentId ? 18 : 16);
+    const bodyHtml = nodeBodyHtml(model.node);
+    return {
+      id: model.node.id,
+      isFocus: model.node.id === props.currentId,
+      hop: model.hop,
+      title: model.node.title || '(untitled)',
+      roleLabel: roleLabel(model),
+      scoreLabel: model.score.toFixed(1),
+      bodyHtml,
+      meta: `Edited ${timeAgo(model.node.updatedAt)} · ${model.node.visits || 0} visit${model.node.visits === 1 ? '' : 's'}`,
+      rect: model,
+      style: {
+        left: `${model.x}px`,
+        top: `${model.y}px`,
+        width: `${model.width}px`,
+        height: `${model.height}px`,
+        fontSize: `${fontSize}px`,
+      },
+    };
+  })
+);
+
+const tileRects = computed(() =>
+  new Map(visibleTiles.value.map(tile => [tile.id, tile.rect]))
+);
+
+const visibleEdges = computed(() =>
+  props.edges
+    .filter(edge => tileRects.value.has(edge.fromId) && tileRects.value.has(edge.toId))
+);
+
+function distributeOffset(index, count) {
+  return (index - (count - 1) / 2) * ENDPOINT_STEP;
+}
+
+function sideEndpoints(edge, index, count) {
+  const from = tileRects.value.get(edge.fromId);
+  const to = tileRects.value.get(edge.toId);
+  const fromCenterX = from.x + from.width / 2;
+  const toCenterX = to.x + to.width / 2;
+  const laneOffset = distributeOffset(index, count);
+  const sourceOnLeft = fromCenterX <= toCenterX;
+  const sourceX = sourceOnLeft ? from.x + from.width : from.x;
+  const targetX = sourceOnLeft ? to.x : to.x + to.width;
+  return {
+    startX: sourceX,
+    startY: clamp(from.y + from.height / 2 + laneOffset, from.y + 18, from.y + from.height - 18),
+    endX: targetX,
+    endY: clamp(to.y + to.height / 2 - laneOffset, to.y + 18, to.y + to.height - 18),
+    laneOffset,
   };
 }
 
-async function layoutGraph() {
-  if (!props.nodes.length) {
-    flowNodes.value = [];
-    flowEdges.value = [];
-    return;
+function routePath(points) {
+  return `M ${points.startX} ${points.startY} H ${points.midX} V ${points.endY} H ${points.endX}`;
+}
+
+const routedEdges = computed(() => {
+  const counts = new Map();
+  const indexes = new Map();
+  for (const edge of visibleEdges.value) {
+    const key = `${edge.fromId}->${edge.toId}`;
+    counts.set(key, (counts.get(key) || 0) + 1);
+    indexes.set(edge.id, counts.get(key) - 1);
   }
 
-  const laidOut = await elk.layout(buildElkGraph());
-  const positions = new Map((laidOut.children || []).map(node => [node.id, node]));
-
-  flowNodes.value = props.nodes.map(node => {
-    const layoutNode = positions.get(node.id);
-    const dimensions = graphNodeDimensions(node.id);
-    return {
-      id: node.id,
-      type: 'memoPage',
-      position: {
-        x: layoutNode?.x ?? 0,
-        y: layoutNode?.y ?? 0,
-      },
-      sourcePosition: Position.Right,
-      targetPosition: Position.Left,
-      width: dimensions.width,
-      height: dimensions.height,
-      data: nodeData(node),
-      class: node.id === props.currentId ? 'memo-graph-flow-node-current' : '',
-      draggable: true,
-    };
-  });
-
-  flowEdges.value = props.edges.map(edge => {
-    const lane = handleLane(parallelIndex(edge, props.edges));
-    const laneSign = lane - Math.floor(HANDLE_COUNT / 2);
+  return visibleEdges.value.map(edge => {
+    const key = `${edge.fromId}->${edge.toId}`;
+    const endpoints = sideEndpoints(edge, indexes.get(edge.id), counts.get(key));
+    const rawMidX = (endpoints.startX + endpoints.endX) / 2 + endpoints.laneOffset;
+    const minX = Math.min(endpoints.startX, endpoints.endX) + CONDUIT_GAP / 2;
+    const maxX = Math.max(endpoints.startX, endpoints.endX) - CONDUIT_GAP / 2;
+    const midX = clamp(rawMidX, minX, maxX);
+    const points = { ...endpoints, midX };
     return {
       id: edge.id,
-      type: 'memoRelation',
-      source: edge.fromId,
-      target: edge.toId,
-      sourceHandle: `source-${lane}`,
-      targetHandle: `target-${lane}`,
-      markerEnd: {
-        type: MarkerType.ArrowClosed,
-        width: 18,
-        height: 18,
-        color: '#a5b4fc',
-      },
-      data: {
-        label: relationLabel(edge),
-        bodyHtml: relationBodyHtml(edge),
-        laneOffset: 24 + Math.abs(laneSign) * 9,
-        labelYOffset: laneSign * 8,
-        strokeWidth: 1.55 + Math.min(2.2, (edge.weight || DEFAULT_EDGE_WEIGHT) / 6),
-      },
-      style: {
-        stroke: edge.fromId === props.currentId || edge.toId === props.currentId
-          ? 'rgba(165, 180, 252, .86)'
-          : 'rgba(129, 140, 248, .48)',
-      },
+      edge,
+      ...points,
+      path: routePath(points),
+      label: relationLabel(edge),
+      bodyHtml: relationBodyHtml(edge),
+      touchesFocus: edge.fromId === props.currentId || edge.toId === props.currentId,
+      strokeWidth: 1.1 + Math.min(1.8, (edge.weight || DEFAULT_EDGE_WEIGHT) / 8),
     };
   });
+});
 
-  await nextTick();
-  fitGraph();
+const routeLabels = computed(() =>
+  routedEdges.value.map(route => {
+    const verticalLength = Math.abs(route.endY - route.startY);
+    const horizontalLength = Math.abs(route.endX - route.startX);
+    const vertical = verticalLength > 60 && verticalLength > horizontalLength * 0.35;
+    const rotation = vertical ? (route.endY < route.startY ? -90 : 90) : 0;
+    const x = vertical ? route.midX : (route.startX + route.endX) / 2;
+    const y = vertical ? (route.startY + route.endY) / 2 : route.endY - 12;
+    return {
+      id: route.id,
+      label: route.label,
+      bodyHtml: route.bodyHtml,
+      vertical,
+      style: {
+        left: `${x}px`,
+        top: `${y}px`,
+        transform: `translate(-50%, -50%) rotate(${rotation}deg)`,
+      },
+    };
+  })
+);
+
+function handleTileClick(tile) {
+  if (tile.id !== props.currentId) emit('navigate', tile.id);
 }
 
-function handleNodeClick({ node }) {
-  if (node.id !== props.currentId) emit('navigate', node.id);
+function updateStageSize() {
+  const rect = stageEl.value?.getBoundingClientRect();
+  stageSize.width = Math.round(rect?.width || 0);
+  stageSize.height = Math.round(rect?.height || 0);
 }
 
-function fitGraph() {
-  nextTick(() => {
-    fitView({ padding: 0.18, duration: 280, includeHiddenNodes: false });
-  });
-}
+onMounted(() => {
+  updateStageSize();
+  resizeObserver = new ResizeObserver(updateStageSize);
+  if (stageEl.value) resizeObserver.observe(stageEl.value);
+});
+
+onBeforeUnmount(() => {
+  resizeObserver?.disconnect();
+});
 
 watch(
-  () => [props.nodes, props.edges, props.currentId],
-  layoutGraph,
-  { deep: true, immediate: true }
+  () => [props.nodes.length, props.edges.length, props.currentId],
+  updateStageSize
 );
 </script>

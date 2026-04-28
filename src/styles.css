@@ -716,14 +716,14 @@ body {
   margin-top: 12px;
 }
 
-/* ── Graph library preview ───────────────────────── */
+/* ── Graph block-map preview ─────────────────────── */
 .memo-graph-view {
   flex: 1;
   min-height: 0;
   display: flex;
   flex-direction: column;
-  padding: 24px;
-  gap: 14px;
+  padding: 18px;
+  gap: 10px;
 }
 
 .memo-graph-toolbar {
@@ -734,8 +734,8 @@ body {
   background: linear-gradient(135deg, rgba(28,32,53,.94), rgba(20,23,38,.92));
   border: 1px solid var(--border);
   border-radius: 14px;
-  padding: 16px 18px;
-  box-shadow: 0 16px 42px rgba(0,0,0,.24);
+  padding: 12px 14px;
+  box-shadow: 0 12px 32px rgba(0,0,0,.22);
 }
 
 .memo-graph-kicker {
@@ -752,6 +752,15 @@ body {
   line-height: 1.25;
 }
 
+.memo-graph-toolbar-summary {
+  color: var(--dim);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: .04em;
+  margin-left: auto;
+  white-space: nowrap;
+}
+
 .memo-graph-toolbar-actions {
   display: flex;
   gap: 8px;
@@ -759,135 +768,161 @@ body {
   justify-content: flex-end;
 }
 
-.memo-graph-flow {
+.memo-map-stage {
   flex: 1;
   min-height: 460px;
+  position: relative;
   border: 1px solid var(--border);
   border-radius: 16px;
   background:
-    radial-gradient(circle at 18px 18px, rgba(129,140,248,.16) 1px, transparent 1.5px) 0 0 / 28px 28px,
-    radial-gradient(circle at 80% 20%, rgba(129,140,248,.16), transparent 32%),
-    linear-gradient(135deg, #0b0d17, #111421 64%, #0d0f1a);
+    linear-gradient(90deg, rgba(129,140,248,.08) 1px, transparent 1px) 0 0 / 18px 18px,
+    linear-gradient(180deg, rgba(129,140,248,.08) 1px, transparent 1px) 0 0 / 18px 18px,
+    linear-gradient(135deg, #0b0d17, #111421 58%, #0d0f1a);
   overflow: hidden;
 }
 
-.memo-graph-flow .vue-flow__node {
-  transition: transform 280ms ease, opacity 220ms ease;
+.memo-map-stage::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(circle at 50% 50%, rgba(129,140,248,.14), transparent 42%),
+    radial-gradient(circle at 12% 80%, rgba(129,140,248,.10), transparent 28%);
+  pointer-events: none;
 }
 
-.memo-graph-flow .vue-flow__edge {
-  transition: opacity 180ms ease;
+.memo-map-routes {
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+  overflow: visible;
+  pointer-events: none;
 }
 
-.memo-graph-node {
-  width: calc(190px + var(--memo-importance, 0) * 120px);
-  min-height: calc(118px + var(--memo-importance, 0) * 98px);
+.memo-map-route {
+  fill: none;
+  stroke: rgba(129,140,248,.42);
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  filter: drop-shadow(0 0 4px rgba(129,140,248,.22));
+  transition: d 260ms ease, stroke .16s ease, stroke-width .16s ease;
+}
+
+.memo-map-route--focused {
+  stroke: rgba(165,180,252,.82);
+}
+
+.memo-map-tile {
+  position: absolute;
+  z-index: 2;
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  padding: calc(12px + var(--memo-importance, 0) * 5px);
+  gap: .45em;
+  padding: .82em .9em .7em;
   color: var(--text);
   background:
-    linear-gradient(180deg, rgba(35,40,69,.96), rgba(20,23,38,.96)),
+    linear-gradient(180deg, rgba(35,40,69,.97), rgba(20,23,38,.98)),
     var(--surface);
   border: 1px solid rgba(129,140,248,.28);
-  border-radius: calc(10px + var(--memo-importance, 0) * 6px);
+  border-radius: 12px;
   box-shadow:
     0 14px 36px rgba(0,0,0,.38),
     inset 0 1px rgba(255,255,255,.04);
   overflow: hidden;
+  text-align: left;
+  cursor: pointer;
+  font-family: inherit;
+  transition:
+    left 280ms ease,
+    top 280ms ease,
+    width 280ms ease,
+    height 280ms ease,
+    border-color .15s ease,
+    box-shadow .15s ease,
+    opacity .15s ease,
+    transform .15s ease;
+  animation: memo-map-tile-in 220ms ease both;
 }
 
-.memo-graph-node--current {
+.memo-map-tile:hover,
+.memo-map-tile:focus-visible {
+  z-index: 6;
+  border-color: rgba(165,180,252,.88);
+  box-shadow:
+    0 0 0 4px rgba(129,140,248,.12),
+    0 18px 48px rgba(0,0,0,.46);
+  transform: translateY(-1px);
+  outline: none;
+}
+
+.memo-map-tile--focus {
   border-color: rgba(165,180,252,.9);
   box-shadow:
     0 0 0 4px rgba(129,140,248,.14),
     0 20px 54px rgba(0,0,0,.48);
 }
 
-.memo-graph-node--remote {
-  opacity: .84;
+.memo-map-tile--remote {
+  opacity: .78;
   border-style: dashed;
 }
 
-.memo-graph-node-topline {
+.memo-map-tile-topline {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 8px;
   color: var(--muted);
-  font-size: 9.5px;
+  font-size: max(8px, .55em);
   font-weight: 800;
   letter-spacing: .1em;
   text-transform: uppercase;
 }
 
-.memo-graph-node-score {
-  color: var(--accent);
-  font-variant-numeric: tabular-nums;
-}
-
-.memo-graph-node-title {
-  font-size: calc(14px + var(--memo-importance, 0) * 5px);
+.memo-map-tile-title {
+  display: block;
+  font-size: 1.08em;
   font-weight: 800;
   line-height: 1.16;
 }
 
-.memo-graph-node-body {
-  max-height: calc(48px + var(--memo-importance, 0) * 76px);
+.memo-map-tile-body {
+  display: block;
+  flex: 1;
+  min-height: 0;
   overflow: hidden;
   color: var(--muted);
-  mask-image: linear-gradient(#000 74%, transparent);
+  font-size: .78em;
+  line-height: 1.42;
+  mask-image: linear-gradient(#000 82%, transparent);
 }
 
-.memo-graph-node-body--empty {
-  font-size: 12px;
+.memo-map-tile-body--empty {
   font-style: italic;
 }
 
-.memo-graph-node-meta {
-  margin-top: auto;
+.memo-map-tile-meta {
+  display: block;
   color: var(--dim);
-  font-size: 10px;
+  font-size: max(8px, .58em);
 }
 
-.memo-graph-handle {
-  width: 7px;
-  height: 7px;
-  opacity: .18;
-  background: var(--accent);
-  border: 1px solid rgba(255,255,255,.32);
-}
-
-.memo-graph-handle--left { left: -4px; }
-.memo-graph-handle--right { right: -4px; }
-
-.memo-graph-edge-path {
-  fill: none;
-  stroke-linecap: round;
-  filter: drop-shadow(0 0 4px rgba(129,140,248,.18));
-  transition: stroke .16s ease, stroke-width .16s ease, filter .16s ease;
-}
-
-.memo-graph-edge-path--active {
-  stroke: rgba(221,225,245,.95) !important;
-  filter: drop-shadow(0 0 8px rgba(165,180,252,.44));
-}
-
-.memo-graph-edge-label {
+.memo-map-route-label {
   position: absolute;
-  pointer-events: all;
-  z-index: 5;
+  z-index: 8;
+  pointer-events: auto;
+  transform-origin: center;
+  transition: left 280ms ease, top 280ms ease, transform 280ms ease;
 }
 
-.memo-graph-edge-label-button {
-  max-width: 190px;
+.memo-map-route-label-button {
+  max-width: 170px;
   border: 1px solid rgba(129,140,248,.28);
   border-radius: 999px;
   background: color-mix(in srgb, var(--bg) 80%, var(--accent) 20%);
   color: var(--muted);
   box-shadow: 0 0 0 4px rgba(13,15,26,.9), 0 8px 22px rgba(0,0,0,.36);
-  cursor: default;
+  cursor: help;
   font-family: inherit;
   font-size: 10px;
   line-height: 1.25;
@@ -897,14 +932,17 @@ body {
   white-space: nowrap;
 }
 
-.memo-graph-edge-label:hover .memo-graph-edge-label-button,
-.memo-graph-edge-label:focus-within .memo-graph-edge-label-button,
-.memo-graph-edge-label--active .memo-graph-edge-label-button {
+.memo-map-route-label--vertical .memo-map-route-label-button {
+  max-width: 150px;
+}
+
+.memo-map-route-label:hover .memo-map-route-label-button,
+.memo-map-route-label:focus-within .memo-map-route-label-button {
   color: var(--text);
   border-color: rgba(129,140,248,.72);
 }
 
-.memo-graph-edge-popover {
+.memo-map-route-popover {
   position: absolute;
   left: 50%;
   top: 24px;
@@ -922,14 +960,14 @@ body {
   transition: opacity .14s ease, transform .14s ease;
 }
 
-.memo-graph-edge-label:hover .memo-graph-edge-popover,
-.memo-graph-edge-label:focus-within .memo-graph-edge-popover {
+.memo-map-route-label:hover .memo-map-route-popover,
+.memo-map-route-label:focus-within .memo-map-route-popover {
   opacity: 1;
   pointer-events: auto;
   transform: translateX(-50%) scale(1);
 }
 
-.memo-graph-edge-popover-title {
+.memo-map-route-popover-title {
   color: var(--text);
   font-size: 13px;
   font-weight: 800;
@@ -937,7 +975,7 @@ body {
   margin-bottom: 8px;
 }
 
-.memo-graph-edge-popover-body {
+.memo-map-route-popover-body {
   max-height: 180px;
   overflow: auto;
   color: var(--muted);
@@ -945,13 +983,18 @@ body {
   line-height: 1.55;
 }
 
-.memo-graph-edge-popover-body p { margin: 0 0 5px; }
-.memo-graph-edge-popover-body p:last-child { margin-bottom: 0; }
-.memo-graph-edge-popover-body img {
+.memo-map-route-popover-body p { margin: 0 0 5px; }
+.memo-map-route-popover-body p:last-child { margin-bottom: 0; }
+.memo-map-route-popover-body img {
   display: block;
   max-width: 100%;
   height: auto;
   border-radius: 5px;
+}
+
+@keyframes memo-map-tile-in {
+  from { opacity: 0; transform: scale(.96); }
+  to { opacity: 1; transform: scale(1); }
 }
 
 /* ── Empty state ───────────────────────────────── */
