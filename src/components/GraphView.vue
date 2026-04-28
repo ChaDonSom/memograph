@@ -802,7 +802,7 @@ function routePoint(point) {
 }
 
 function routeGridLines(start, end, preferredPoints, obstacles) {
-  const validPreferredPoints = preferredPoints.filter(point => Number.isFinite(point?.x) && Number.isFinite(point?.y));
+  const validPreferredPoints = preferredPoints.filter(point => point && Number.isFinite(point.x) && Number.isFinite(point.y));
   const xLines = [
     ROUTE_EDGE_PADDING,
     stageSize.width - ROUTE_EDGE_PADDING,
@@ -821,8 +821,7 @@ function routeGridLines(start, end, preferredPoints, obstacles) {
     xLines.push(rect.x - ROUTE_CARD_CLEARANCE, rect.x + rect.width + ROUTE_CARD_CLEARANCE);
     yLines.push(rect.y - ROUTE_CARD_CLEARANCE, rect.y + rect.height + ROUTE_CARD_CLEARANCE);
   }
-  for (const corridor of routeCorridors.value) {
-    if (!corridor) continue;
+  for (const corridor of routeCorridors.value.filter(Boolean)) {
     xLines.push(
       corridor.x + ROUTE_EDGE_PADDING / 2,
       corridor.x + corridor.width / 2,
@@ -904,7 +903,7 @@ function findClearOrthogonalRoute(points) {
   const distances = new Map();
   const previous = new Map();
   const queue = [];
-  // Search states are encoded as "x,y|previousAxis" so the same grid point can be reached with different turn costs.
+  // Search states are encoded as "x,y|previousAxis" so turn penalties can distinguish approaches to the same point.
   const startState = `${nodeKey(start.x, start.y)}|none`;
   distances.set(startState, 0);
   enqueueRouteState(queue, { state: startState, cost: 0 });
