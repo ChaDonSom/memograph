@@ -484,11 +484,12 @@ function nodeScoreParts(node) {
 }
 
 function capTreemapModels(models) {
-  if (models.length <= TREEMAP_MAX_VISIBLE_TILES) return models;
+  const sorted = [...models].sort((a, b) => b.score - a.score || (b.node.updatedAt || 0) - (a.node.updatedAt || 0));
+  if (sorted.length <= TREEMAP_MAX_VISIBLE_TILES) return sorted;
 
-  const capped = models.slice(0, TREEMAP_MAX_VISIBLE_TILES);
+  const capped = sorted.slice(0, TREEMAP_MAX_VISIBLE_TILES);
   if (props.currentId && !capped.some(model => model.node.id === props.currentId)) {
-    const current = models.find(model => model.node.id === props.currentId);
+    const current = sorted.find(model => model.node.id === props.currentId);
     if (current) capped[capped.length - 1] = current;
   }
 
@@ -503,8 +504,7 @@ const visibleNodeModels = computed(() => {
         hop: node.id === props.currentId ? 0 : 1,
         side: 'treemap',
         score: treemapPScore(node),
-      }))
-      .sort((a, b) => b.score - a.score || (b.node.updatedAt || 0) - (a.node.updatedAt || 0)));
+      })));
   }
 
   const models = props.nodes
@@ -815,13 +815,21 @@ function treemapEdgeRoutingScore(edge) {
     + Math.max(fromScore, toScore);
 }
 
+function compareEdgeIds(left, right) {
+  if (typeof left === 'number' && typeof right === 'number') return left - right;
+  const leftString = String(left);
+  const rightString = String(right);
+  if (leftString === rightString) return 0;
+  return leftString < rightString ? -1 : 1;
+}
+
 const visibleEdges = computed(() => {
   const edges = eligibleVisibleEdges.value;
   if (!isTreemapVariant.value || edges.length <= TREEMAP_MAX_ROUTED_EDGES) return edges;
 
   return edges
     .map(edge => ({ edge, score: treemapEdgeRoutingScore(edge) }))
-    .sort((a, b) => b.score - a.score || (a.edge.id > b.edge.id ? 1 : -1))
+    .sort((a, b) => b.score - a.score || compareEdgeIds(a.edge.id, b.edge.id))
     .slice(0, TREEMAP_MAX_ROUTED_EDGES)
     .map(({ edge }) => edge);
 });
