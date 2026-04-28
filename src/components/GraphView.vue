@@ -850,14 +850,36 @@ function compactOrthogonalPoints(points) {
 }
 
 function enqueueRouteState(queue, entry) {
-  let low = 0;
-  let high = queue.length;
-  while (low < high) {
-    const mid = Math.floor((low + high) / 2);
-    if (queue[mid].cost >= entry.cost) low = mid + 1;
-    else high = mid;
+  queue.push(entry);
+  let index = queue.length - 1;
+  while (index > 0) {
+    const parentIndex = Math.floor((index - 1) / 2);
+    if (queue[parentIndex].cost <= queue[index].cost) break;
+    [queue[parentIndex], queue[index]] = [queue[index], queue[parentIndex]];
+    index = parentIndex;
   }
-  queue.splice(low, 0, entry);
+}
+
+function dequeueRouteState(queue) {
+  if (queue.length <= 1) return queue.pop();
+  const next = queue[0];
+  queue[0] = queue.pop();
+  let index = 0;
+  while (true) {
+    const leftIndex = index * 2 + 1;
+    const rightIndex = leftIndex + 1;
+    let smallestIndex = index;
+    if (leftIndex < queue.length && queue[leftIndex].cost < queue[smallestIndex].cost) {
+      smallestIndex = leftIndex;
+    }
+    if (rightIndex < queue.length && queue[rightIndex].cost < queue[smallestIndex].cost) {
+      smallestIndex = rightIndex;
+    }
+    if (smallestIndex === index) break;
+    [queue[index], queue[smallestIndex]] = [queue[smallestIndex], queue[index]];
+    index = smallestIndex;
+  }
+  return next;
 }
 
 function findClearOrthogonalRoute(points) {
@@ -886,7 +908,7 @@ function findClearOrthogonalRoute(points) {
   enqueueRouteState(queue, { state: startState, cost: 0 });
 
   while (queue.length) {
-    const { state, cost } = queue.pop();
+    const { state, cost } = dequeueRouteState(queue);
     if (cost !== distances.get(state)) continue;
     const [key, previousAxis] = state.split('|');
     const current = parseKey(key);
