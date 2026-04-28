@@ -124,6 +124,7 @@ const ENDPOINT_STEP = 12;
 const FOCUS_SCORE_BOOST_RATIO = 1.08;
 // With only a few visible blocks, relax the focus floor so neighbors can approach one-third-screen tiles.
 const MIN_FOCUS_FALLBACK_RATIO = 0.72;
+const MIN_TILES_FOR_BALANCED_FOCUS = 3;
 // Empirically favors slightly wide, readable text blocks while leaving enough gutters for conduits.
 const TREEMAP_ASPECT_RATIO = 1.18;
 const MIN_TILE_FONT_SIZE = 10;
@@ -131,7 +132,8 @@ const TILE_FONT_SCALE = 24;
 const FOCUS_MAX_FONT_SIZE = 18;
 const TILE_MAX_FONT_SIZE = 16;
 const MIN_VERTICAL_LABEL_LENGTH = 60;
-const VERTICAL_LABEL_THRESHOLD_RATIO = 0.35;
+const VERTICAL_LABEL_MIN_ASPECT_RATIO = 0.35;
+const ROUTE_EDGE_PADDING = 18;
 
 function clamp(value, min, max) {
   return Math.min(max, Math.max(min, value));
@@ -150,13 +152,11 @@ function nodeBodyHtml(node) {
   return sanitizeRichHtml(normalizeEditorHtml(node.bodyHtml || ''));
 }
 
-function nodePlainText(node) {
-  const html = nodeBodyHtml(node);
+function plainTextFromHtml(html) {
   return richTextToPlainText(html) || (/<img\s[^>]*>|<img>/i.test(html) ? 'Image-only page.' : '');
 }
 
-function nodeRichness(node) {
-  const html = nodeBodyHtml(node);
+function richnessFromHtml(html) {
   const imageScore = (html.match(/<img\b/gi)?.length || 0) * 4;
   const headingScore = (html.match(/<h[1-6]\b/gi)?.length || 0) * 1.6;
   const listScore = (html.match(/<(ul|ol|li)\b/gi)?.length || 0) * 0.7;
@@ -177,6 +177,18 @@ function relationBodyHtml(edge) {
 
 const nodesById = computed(() =>
   new Map(props.nodes.map(node => [node.id, node]))
+);
+
+const nodeContentStats = computed(() =>
+  new Map(props.nodes.map(node => {
+    const html = nodeBodyHtml(node);
+    const plainText = plainTextFromHtml(html);
+    return [node.id, {
+      html,
+      plainText,
+      richness: richnessFromHtml(html),
+    }];
+  }))
 );
 
 const degreeStats = computed(() => {
@@ -237,9 +249,10 @@ function focusedPScore(node) {
   if (node.id === props.currentId) return FOCUS_MIN_SCORE;
 
   const stats = degreeStats.value.get(node.id) || { incoming: 0, outgoing: 0, weight: 0 };
-  const contentLength = nodePlainText(node).length;
+  const content = nodeContentStats.value.get(node.id) || { plainText: '', richness: 0 };
+  const contentLength = content.plainText.length;
   const contentScore = clamp(Math.log2(contentLength + 1) * 1.45, 0, CONTENT_SCORE_CAP);
-  const richnessScore = nodeRichness(node);
+  const richnessScore = content.richness;
   const visitScore = Math.log2((node.visits || 0) + 1) * 1.8;
   const degreeScore = Math.log2(stats.incoming + stats.outgoing + 1) * 3;
   const directEdgeScore = distance.relationWeight * 2.6;
@@ -268,7 +281,7 @@ const visibleNodeModels = computed(() => {
     })
     .slice(0, MAX_VISIBLE_TILES);
 
-  if (models.length <= 3 && models.length > 1) {
+  if (models.length <= MIN_TILES_FOR_BALANCED_FOCUS && models.length > 1) {
     const averageRelatedScore = models
       .filter(model => model.node.id !== props.currentId)
       .reduce((sum, model) => sum + model.score, 0) / (models.length - 1);
@@ -339,6 +352,7 @@ const layoutModels = computed(() => {
   for (const group of groups) {
     const minWidth = minWidths.get(group.key);
     const idealWidth = availableWidth * (Math.max(1, group.value) / totalValue);
+    // A one-group layout should simply fill the full stage; multiple groups need minimums to preserve readable side columns.
     if (idealWidth < minWidth && groups.length > 1) {
       widths.set(group.key, minWidth);
       remainingWidth -= minWidth;
@@ -394,7 +408,7 @@ const visibleTiles = computed(() =>
       MIN_TILE_FONT_SIZE,
       model.node.id === props.currentId ? FOCUS_MAX_FONT_SIZE : TILE_MAX_FONT_SIZE
     );
-    const bodyHtml = nodeBodyHtml(model.node);
+    const bodyHtml = nodeContentStats.value.get(model.node.id)?.html || '';
     return {
       id: model.node.id,
       isFocus: model.node.id === props.currentId,
@@ -440,9 +454,17 @@ function sideEndpoints(edge, index, count) {
   const targetX = sourceOnLeft ? to.x : to.x + to.width;
   return {
     startX: sourceX,
-    startY: clamp(from.y + from.height / 2 + laneOffset, from.y + 18, from.y + from.height - 18),
+    startY: clamp(
+      from.y + from.height / 2 + laneOffset,
+      from.y + ROUTE_EDGE_PADDING,
+      from.y + from.height - ROUTE_EDGE_PADDING
+    ),
     endX: targetX,
-    endY: clamp(to.y + to.height / 2 - laneOffset, to.y + 18, to.y + to.height - 18),
+    endY: clamp(
+      to.y + to.height / 2 - laneOffset,
+      to.y + ROUTE_EDGE_PADDING,
+      to.y + to.height - ROUTE_EDGE_PADDING
+    ),
     laneOffset,
   };
 }
@@ -486,7 +508,7 @@ const routeLabels = computed(() =>
     const verticalLength = Math.abs(route.endY - route.startY);
     const horizontalLength = Math.abs(route.endX - route.startX);
     const vertical = verticalLength > MIN_VERTICAL_LABEL_LENGTH
-      && verticalLength > horizontalLength * VERTICAL_LABEL_THRESHOLD_RATIO;
+      && verticalLength > horizontalLength * VERTICAL_LABEL_MIN_ASPECT_RATIO;
     const rotation = vertical ? (route.endY < route.startY ? -90 : 90) : 0;
     const x = vertical ? route.midX : (route.startX + route.endX) / 2;
     const y = vertical ? (route.startY + route.endY) / 2 : route.endY - 12;
@@ -525,7 +547,8 @@ onBeforeUnmount(() => {
 });
 
 watch(
-  () => [props.nodes.length, props.edges.length, props.currentId],
-  updateStageSize
+  () => [props.nodes, props.edges, props.currentId],
+  updateStageSize,
+  { deep: true }
 );
 </script>
