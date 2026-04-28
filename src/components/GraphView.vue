@@ -246,11 +246,12 @@ let tileEditor = null;
 let tileEditorHost = null;
 let tileImageClickHandler = null;
 
-/**
- * Corridor sizing starts with a small base whitespace and grows linearly per shared route.
- */
+// Minimum visual gap between card columns even when no routes pass through.
 const BASE_CORRIDOR_GAP = 12;
-const CORRIDOR_WIDTH_PER_ROUTE = 7;
+// How far apart adjacent lanes are spaced inside a corridor (px).
+const LANE_STEP = 12;
+// Inset from each corridor edge so routes never clip the card border.
+const LANE_MARGIN = 4;
 const OUTER_PADDING = 18;
 const PERIMETER_ROUTE_LANE = 12;
 const MIN_SIDE_WIDTH = 150;
@@ -279,7 +280,6 @@ const ROUTE_MASK_CARD_BLEED = 0;
 const ROUTE_MASK_CARD_BORDER_RADIUS = 13;
 const ROUTE_CORNER_RADIUS = 9;
 const SAME_GROUP_ROUTE_PADDING = 24;
-const LANE_STEP = 12;
 const SAME_GROUP_LANE_STEP = 24;
 const LABEL_DEFAULT_OFFSET = 12;
 const LABEL_STACK_STEP = 18;
@@ -533,7 +533,9 @@ function treemapGroup(models, bounds) {
 }
 
 function corridorWidth(routeCount) {
-  return BASE_CORRIDOR_GAP + routeCount * CORRIDOR_WIDTH_PER_ROUTE;
+  // Each additional route after the first needs its own LANE_STEP of space.
+  // 1 route sits at the center and needs no extra width beyond the base gap.
+  return BASE_CORRIDOR_GAP + Math.max(0, routeCount - 1) * LANE_STEP;
 }
 
 function createCorridorLoadsArray(groupCount) {
@@ -791,8 +793,8 @@ function laneXInCorridor(corridor, laneOffset) {
   const center = corridor.x + corridor.width / 2;
   return clamp(
     center + laneOffset,
-    corridor.x + ROUTE_EDGE_PADDING / 2,
-    corridor.x + corridor.width - ROUTE_EDGE_PADDING / 2
+    corridor.x + LANE_MARGIN,
+    corridor.x + corridor.width - LANE_MARGIN
   );
 }
 
@@ -1096,11 +1098,14 @@ function labelRotation(vertical, startY, endY) {
 }
 
 /**
- * Returns the perpendicular unit vector used to nudge labels away from a route segment.
+ * Returns the unit vector along a route segment (the direction the segment travels).
+ * Collision nudges move the label in this direction so it stays on its line.
  */
-function routeSegmentNormal(segment) {
-  if (segment.vertical) return { x: 1, y: 0 };
-  return { x: 0, y: -1 };
+function routeSegmentAlong(segment) {
+  if (segment.vertical) {
+    return { x: 0, y: segment.end.y >= segment.start.y ? 1 : -1 };
+  }
+  return { x: segment.end.x >= segment.start.x ? 1 : -1, y: 0 };
 }
 
 const routedEdges = computed(() => {
@@ -1256,7 +1261,10 @@ const routedEdges = computed(() => {
 });
 
 /**
- * Chooses the clearest label position, preferring long horizontal route segments before vertical fallbacks.
+ * Picks the best label position on the route: the midpoint of the longest
+ * horizontal segment (if long enough), otherwise the longest segment overall.
+ * Returns the position, orientation flags, along-direction for nudging, and
+ * the segment's own bounds so collision nudges stay on the line.
  */
 function routeLabelPlacement(route) {
   const segments = [];
@@ -1283,7 +1291,8 @@ function routeLabelPlacement(route) {
       y: (route.startY + route.endY) / 2 - LABEL_DEFAULT_OFFSET,
       vertical: false,
       rotation: 0,
-      normal: { x: 0, y: -1 },
+      along: { x: 1, y: 0 },
+      segmentBounds: null,
     };
   }
   const vertical = !horizontal && segment.vertical && segment.length >= MIN_VERTICAL_LABEL_LENGTH;
@@ -1292,7 +1301,13 @@ function routeLabelPlacement(route) {
     y: (segment.start.y + segment.end.y) / 2,
     vertical,
     rotation: labelRotation(vertical, segment.start.y, segment.end.y),
-    normal: routeSegmentNormal(segment),
+    along: routeSegmentAlong(segment),
+    segmentBounds: {
+      minX: Math.min(segment.start.x, segment.end.x),
+      maxX: Math.max(segment.start.x, segment.end.x),
+      minY: Math.min(segment.start.y, segment.end.y),
+      maxY: Math.max(segment.start.y, segment.end.y),
+    },
   };
 }
 
@@ -1324,14 +1339,6 @@ function boundsOverlap(a, b) {
     && a.bottom + LABEL_COLLISION_GAP > b.top;
 }
 
-/**
- * Keeps a label position inside the visible graph stage.
- */
-function nudgeLabelIntoStage(label) {
-  label.x = clamp(label.x, ROUTE_EDGE_PADDING, stageSize.width - ROUTE_EDGE_PADDING);
-  label.y = clamp(label.y, PERIMETER_ROUTE_LANE, stageSize.height - PERIMETER_ROUTE_LANE);
-}
-
 const routeLabels = computed(() => {
   const placed = [];
   return routedEdges.value.map(route => {
@@ -1348,17 +1355,22 @@ const routeLabels = computed(() => {
       rotation: placement.rotation,
       x: placement.x,
       y: placement.y,
-      normal: placement.normal,
     };
 
+    // Slide the label along its segment to avoid overlapping other labels.
+    // Sliding along the segment (not perpendicular) keeps the label on its line.
     let attempt = 0;
     let currentBounds = labelBounds(label);
     while (placed.some(existing => boundsOverlap(currentBounds, labelBounds(existing))) && attempt < LABEL_PLACEMENT_MAX_ATTEMPTS) {
       const direction = attempt % 2 === 0 ? 1 : -1;
       const distance = Math.ceil((attempt + 1) / 2) * LABEL_STACK_STEP;
-      label.x = placement.x + label.normal.x * direction * distance;
-      label.y = placement.y + label.normal.y * direction * distance;
-      nudgeLabelIntoStage(label);
+      label.x = placement.x + placement.along.x * direction * distance;
+      label.y = placement.y + placement.along.y * direction * distance;
+      // Clamp within the segment so the label never leaves its line.
+      if (placement.segmentBounds) {
+        label.x = clamp(label.x, placement.segmentBounds.minX, placement.segmentBounds.maxX);
+        label.y = clamp(label.y, placement.segmentBounds.minY, placement.segmentBounds.maxY);
+      }
       currentBounds = labelBounds(label);
       attempt++;
     }
