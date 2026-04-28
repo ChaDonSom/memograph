@@ -36,8 +36,8 @@
           <mask
             id="memo-map-route-card-mask"
             maskUnits="userSpaceOnUse"
-            :x="0"
-            :y="0"
+            x="0"
+            y="0"
             :width="stageSize.width"
             :height="stageSize.height"
           >
