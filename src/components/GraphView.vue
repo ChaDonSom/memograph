@@ -170,9 +170,10 @@ const editingTileId = ref('');
 const tileDraft = reactive({ title: '', bodyText: '' });
 let resizeObserver = null;
 
-/** Minimum whitespace preserved between block groups before route lanes are added. */
+/**
+ * Corridor sizing starts with a small base whitespace and grows linearly per shared route.
+ */
 const BASE_CORRIDOR_GAP = 12;
-/** Extra corridor width assigned for each route sharing that whitespace. */
 const CORRIDOR_WIDTH_PER_ROUTE = 7;
 const OUTER_PADDING = 18;
 const PERIMETER_ROUTE_LANE = 12;
@@ -199,7 +200,7 @@ const ROUTE_EDGE_PADDING = 18;
 const ROUTE_CARD_CLEARANCE = 11;
 const ROUTE_CORNER_RADIUS = 9;
 const SAME_GROUP_ROUTE_PADDING = 24;
-/** Same-group routes use tighter offsets because their tile-to-tile gaps are already narrow. */
+/** Scales down lane offsets for same-group routes because tile-to-tile gaps are already narrow. */
 const SAME_GROUP_LANE_FACTOR = 0.45;
 const LANE_STEP = 10;
 const LABEL_DEFAULT_OFFSET = 12;
@@ -651,8 +652,8 @@ function corridorIndexesBetween(from, to) {
 }
 
 /**
- * Returns a symmetric offset around zero for evenly spacing endpoints or lanes.
- * The step controls pixel spacing; route lanes use a smaller step than card-edge endpoints.
+ * Returns a symmetric pixel offset around zero for evenly spacing endpoints or lanes.
+ * Pass a smaller step for route lanes and the default step for card-edge endpoints.
  */
 function distributeOffset(index, count, step = ENDPOINT_STEP) {
   return (index - (count - 1) / 2) * step;
@@ -738,13 +739,13 @@ const routedEdges = computed(() => {
       if (!corridorLaneGroups.has(corridorIndex)) corridorLaneGroups.set(corridorIndex, []);
       corridorLaneGroups.get(corridorIndex).push({
         id: plan.edge.id,
-        sort: (rectCenter(plan.from).y + rectCenter(plan.to).y) / 2,
+        sortKey: (rectCenter(plan.from).y + rectCenter(plan.to).y) / 2,
       });
     }
   }
   for (const [corridorIndex, routes] of corridorLaneGroups) {
     routes
-      .sort((a, b) => a.sort - b.sort || a.id.localeCompare(b.id))
+      .sort((a, b) => a.sortKey - b.sortKey || a.id.localeCompare(b.id))
       .forEach((route, index) => {
         corridorLaneOffsets.set(`${route.id}:${corridorIndex}`, distributeOffset(index, routes.length, LANE_STEP));
       });
