@@ -252,6 +252,7 @@ const MIN_FOCUS_WIDTH = 210;
 const MAX_VISIBLE_TILES = 28;
 const TREEMAP_MAX_VISIBLE_TILES = 48;
 const TREEMAP_MAX_EDGES_TO_ROUTE = 96;
+const CURRENT_NODE_EDGE_PRIORITY_BOOST = 1000;
 const FOCUS_MIN_SCORE = 36;
 const HOP_DECAY = 0.58;
 const CONTENT_SCORE_CAP = 12;
@@ -483,12 +484,12 @@ function nodeScoreParts(node) {
   };
 }
 
-function compareTreemapModels(a, b) {
+function compareTreemapModelsByScoreAndDate(a, b) {
   return b.score - a.score || (b.node.updatedAt || 0) - (a.node.updatedAt || 0);
 }
 
 function capTreemapModels(models) {
-  const sorted = [...models].sort(compareTreemapModels);
+  const sorted = [...models].sort(compareTreemapModelsByScoreAndDate);
   if (sorted.length <= TREEMAP_MAX_VISIBLE_TILES) return sorted;
 
   const capped = sorted.slice(0, TREEMAP_MAX_VISIBLE_TILES);
@@ -496,7 +497,7 @@ function capTreemapModels(models) {
     const current = sorted.find(model => model.node.id === props.currentId);
     if (current) {
       capped.pop();
-      const insertIndex = capped.findIndex(model => compareTreemapModels(current, model) < 0);
+      const insertIndex = capped.findIndex(model => compareTreemapModelsByScoreAndDate(current, model) < 0);
       if (insertIndex === -1) capped.push(current);
       else capped.splice(insertIndex, 0, current);
     }
@@ -819,7 +820,7 @@ function treemapEdgeRoutingScore(edge) {
   const to = nodesById.value.get(edge.toId);
   const fromScore = from ? treemapPScore(from) : 0;
   const toScore = to ? treemapPScore(to) : 0;
-  return (touchesCurrent ? 1000 : 0)
+  return (touchesCurrent ? CURRENT_NODE_EDGE_PRIORITY_BOOST : 0)
     + (edge.weight || DEFAULT_EDGE_WEIGHT) * 10
     + Math.max(fromScore, toScore);
 }
