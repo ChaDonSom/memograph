@@ -53,8 +53,10 @@
       <div
         v-for="tile in visibleTiles"
         :key="tile.id"
-        role="button"
+        role="link"
         tabindex="0"
+        :aria-current="tile.isFocus ? 'page' : undefined"
+        :aria-label="`${tile.title}. ${tile.roleLabel}. Press Enter to focus this page.`"
         class="memo-map-tile"
         :class="{
           'memo-map-tile--focus': tile.isFocus,
@@ -63,8 +65,8 @@
         }"
         :style="tile.style"
         @click="handleTileClick(tile)"
-        @keydown.enter.self.prevent="handleTileClick(tile)"
-        @keydown.space.self.prevent="handleTileClick(tile)"
+        @keydown.enter.prevent="handleTileKeydown($event, tile)"
+        @keydown.space.prevent="handleTileKeydown($event, tile)"
         @mouseenter="activateNode(tile.id)"
         @mouseleave="clearHighlight"
         @focusin="activateNode(tile.id)"
@@ -85,8 +87,8 @@
         </span>
         <span class="memo-map-tile-meta">{{ tile.meta }}</span>
         <span class="memo-map-tile-actions" @click.stop>
-          <button type="button" class="memo-map-action" @click="$emit('edit-page', tile.id)">Edit page</button>
-          <button type="button" class="memo-map-action memo-map-action--danger" @click="$emit('delete-page', tile.id)">Delete page</button>
+          <button type="button" class="memo-map-action" @click="$emit('edit-page', tile.id)" @keydown.stop>Edit page</button>
+          <button type="button" class="memo-map-action memo-map-action--danger" @click="$emit('delete-page', tile.id)" @keydown.stop>Delete page</button>
         </span>
       </div>
 
@@ -703,6 +705,11 @@ function handleTileClick(tile) {
   if (tile.id !== props.currentId) emit('navigate', tile.id);
 }
 
+function handleTileKeydown(event, tile) {
+  if (event.target !== event.currentTarget) return;
+  handleTileClick(tile);
+}
+
 function activateNode(nodeId) {
   activeNodeId.value = nodeId;
   activeEdgeId.value = '';
@@ -729,8 +736,11 @@ function isRouteActive(route) {
 function isTileActive(tileId) {
   if (!tileId) return false;
   if (activeNodeId.value === tileId) return true;
-  const activeRoute = routedEdges.value.find(route => route.id === activeEdgeId.value);
-  if (activeRoute) return activeRoute.fromId === tileId || activeRoute.toId === tileId;
+  if (activeEdgeId.value) {
+    const activeRoute = routedEdges.value.find(route => route.id === activeEdgeId.value);
+    return !!activeRoute && (activeRoute.fromId === tileId || activeRoute.toId === tileId);
+  }
+  if (!activeNodeId.value) return false;
   return routedEdges.value.some(route => routeTouchesActiveNode(route) && (route.fromId === tileId || route.toId === tileId));
 }
 
