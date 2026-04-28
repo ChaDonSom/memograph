@@ -121,6 +121,14 @@ const HOP_DECAY = 0.58;
 const CONTENT_SCORE_CAP = 12;
 const RICHNESS_SCORE_CAP = 10;
 const ENDPOINT_STEP = 12;
+const FOCUS_SCORE_BOOST_RATIO = 1.08;
+const MIN_FOCUS_FALLBACK_RATIO = 0.72;
+// Slightly wide squarified tiles leave conduits readable without reverting to long graph rows.
+const TREEMAP_ASPECT_RATIO = 1.18;
+const MIN_TILE_FONT_SIZE = 10;
+const TILE_FONT_SCALE = 24;
+const FOCUS_MAX_FONT_SIZE = 18;
+const TILE_MAX_FONT_SIZE = 16;
 
 function clamp(value, min, max) {
   return Math.min(max, Math.max(min, value));
@@ -179,6 +187,17 @@ const degreeStats = computed(() => {
   return stats;
 });
 
+const bestExistingPScores = computed(() => {
+  const scores = new Map(props.nodes.map(node => [node.id, 0]));
+  for (const edge of props.edges) {
+    const from = nodesById.value.get(edge.fromId);
+    const to = nodesById.value.get(edge.toId);
+    if (from) scores.set(from.id, Math.max(scores.get(from.id) || 0, pScore(edge, from) * 0.35));
+    if (to) scores.set(to.id, Math.max(scores.get(to.id) || 0, pScore(edge, to) * 0.35));
+  }
+  return scores;
+});
+
 const focusedDistances = computed(() => {
   const currentId = props.currentId;
   if (!currentId) return new Map();
@@ -221,9 +240,7 @@ function focusedPScore(node) {
   const visitScore = Math.log2((node.visits || 0) + 1) * 1.8;
   const degreeScore = Math.log2(stats.incoming + stats.outgoing + 1) * 3;
   const directEdgeScore = distance.relationWeight * 2.6;
-  const existingPScore = props.edges
-    .filter(edge => edge.fromId === node.id || edge.toId === node.id)
-    .reduce((best, edge) => Math.max(best, pScore(edge, node) * 0.35), 0);
+  const existingPScore = bestExistingPScores.value.get(node.id) || 0;
 
   return (directEdgeScore + contentScore + richnessScore + visitScore + degreeScore + existingPScore)
     * Math.pow(HOP_DECAY, Math.max(0, distance.hop - 1));
@@ -253,7 +270,12 @@ const visibleNodeModels = computed(() => {
       .filter(model => model.node.id !== props.currentId)
       .reduce((sum, model) => sum + model.score, 0) / (models.length - 1);
     const focus = models.find(model => model.node.id === props.currentId);
-    if (focus) focus.score = Math.max(averageRelatedScore * 1.08, FOCUS_MIN_SCORE * 0.72);
+    if (focus) {
+      focus.score = Math.max(
+        averageRelatedScore * FOCUS_SCORE_BOOST_RATIO,
+        FOCUS_MIN_SCORE * MIN_FOCUS_FALLBACK_RATIO
+      );
+    }
   }
 
   return models;
@@ -269,7 +291,7 @@ function treemapGroup(models, bounds) {
   }).sum(item => item.value || 0);
 
   treemap()
-    .tile(treemapSquarify.ratio(1.18))
+    .tile(treemapSquarify.ratio(TREEMAP_ASPECT_RATIO))
     .size([bounds.width, bounds.height])
     .paddingInner(CONDUIT_GAP)
     .round(true)(root);
@@ -364,7 +386,11 @@ function roleLabel(model) {
 const visibleTiles = computed(() =>
   layoutModels.value.map(model => {
     const areaRatio = clamp((model.width * model.height) / Math.max(1, stageSize.width * stageSize.height), 0, 1);
-    const fontSize = clamp(10 + Math.sqrt(areaRatio) * 24, 10, model.node.id === props.currentId ? 18 : 16);
+    const fontSize = clamp(
+      MIN_TILE_FONT_SIZE + Math.sqrt(areaRatio) * TILE_FONT_SCALE,
+      MIN_TILE_FONT_SIZE,
+      model.node.id === props.currentId ? FOCUS_MAX_FONT_SIZE : TILE_MAX_FONT_SIZE
+    );
     const bodyHtml = nodeBodyHtml(model.node);
     return {
       id: model.node.id,
