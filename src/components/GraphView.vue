@@ -93,8 +93,8 @@
 </template>
 
 <script setup>
-import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue';
 import { hierarchy, treemap, treemapSquarify } from 'd3-hierarchy';
+import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue';
 import { DEFAULT_EDGE_WEIGHT, pScore, timeAgo } from '../utils/scoring.js';
 import { normalizeEditorHtml, sanitizeRichHtml } from '../utils/sanitize.js';
 import { richTextFirstLine, richTextToPlainText, truncateText } from '../utils/text.js';
@@ -122,7 +122,7 @@ const CONTENT_SCORE_CAP = 12;
 const RICHNESS_SCORE_CAP = 10;
 const ENDPOINT_STEP = 12;
 const FOCUS_SCORE_BOOST_RATIO = 1.08;
-// With only a few visible blocks, relax the focus floor so neighbors can approach one-third-screen tiles.
+// With only a few visible blocks, cap the focus near 72% of its normal floor so two neighbors can approach one-third-screen tiles.
 const MIN_FOCUS_FALLBACK_RATIO = 0.72;
 const MIN_TILES_FOR_BALANCED_FOCUS = 3;
 // Empirically favors slightly wide, readable text blocks while leaving enough gutters for conduits.
@@ -282,9 +282,9 @@ const visibleNodeModels = computed(() => {
     .slice(0, MAX_VISIBLE_TILES);
 
   if (models.length <= MIN_TILES_FOR_BALANCED_FOCUS && models.length > 1) {
-    const averageRelatedScore = models
-      .filter(model => model.node.id !== props.currentId)
-      .reduce((sum, model) => sum + model.score, 0) / (models.length - 1);
+    const relatedModels = models.filter(model => model.node.id !== props.currentId);
+    if (!relatedModels.length) return models;
+    const averageRelatedScore = relatedModels.reduce((sum, model) => sum + model.score, 0) / relatedModels.length;
     const focus = models.find(model => model.node.id === props.currentId);
     if (focus) {
       focus.score = Math.max(
@@ -352,7 +352,7 @@ const layoutModels = computed(() => {
   for (const group of groups) {
     const minWidth = minWidths.get(group.key);
     const idealWidth = availableWidth * (Math.max(1, group.value) / totalValue);
-    // A one-group layout should simply fill the full stage; multiple groups need minimums to preserve readable side columns.
+    // For multiple groups, enforce minimum widths to preserve readable columns; single-group layouts fill the stage naturally.
     if (idealWidth < minWidth && groups.length > 1) {
       widths.set(group.key, minWidth);
       remainingWidth -= minWidth;
@@ -470,6 +470,7 @@ function sideEndpoints(edge, index, count) {
 }
 
 function routePath(points) {
+  // Orthogonal route: move to source, cross the conduit horizontally, run vertically, then enter the target horizontally.
   return `M ${points.startX} ${points.startY} H ${points.midX} V ${points.endY} H ${points.endX}`;
 }
 
