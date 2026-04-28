@@ -1317,6 +1317,7 @@ function pointBackAlongRoute(points, distanceFromEnd) {
     if (length <= 0) continue;
     if (remaining <= length) {
       const ratio = remaining / length;
+      // Interpolate from the route end toward the segment start to move back along the path.
       return {
         x: end.x + (start.x - end.x) * ratio,
         y: end.y + (start.y - end.y) * ratio,
@@ -1362,11 +1363,15 @@ function arrowheadPolygon(point, unit) {
   return `${point.x},${point.y} ${left.x},${left.y} ${right.x},${right.y}`;
 }
 
+function quantizeArrowheadEndpoint(value) {
+  return Math.round(value / ARROWHEAD_ENDPOINT_QUANTIZATION_GRID) * ARROWHEAD_ENDPOINT_QUANTIZATION_GRID;
+}
+
 const routeArrowheads = computed(() => {
   const placedByEndpoint = new Map();
   const labels = routeLabels.value.map(label => ({ x: label.x, y: label.y }));
   return routedEdges.value.map(route => {
-    const endpointKey = `${Math.round(route.endX / ARROWHEAD_ENDPOINT_QUANTIZATION_GRID) * ARROWHEAD_ENDPOINT_QUANTIZATION_GRID}:${Math.round(route.endY / ARROWHEAD_ENDPOINT_QUANTIZATION_GRID) * ARROWHEAD_ENDPOINT_QUANTIZATION_GRID}`;
+    const endpointKey = `${quantizeArrowheadEndpoint(route.endX)}:${quantizeArrowheadEndpoint(route.endY)}`;
     const endpointCount = placedByEndpoint.get(endpointKey) || 0;
     placedByEndpoint.set(endpointKey, endpointCount + 1);
     let distanceFromEnd = ARROWHEAD_ENDPOINT_GAP + endpointCount * ARROWHEAD_COLLISION_STEP;
@@ -1460,7 +1465,7 @@ function restoreEditorContents(quill, serializedDelta) {
 
 function initTileEditor() {
   if (!tileEditorHost || !editingTileId.value) return;
-  tileEditorHost.innerHTML = '';
+  tileEditorHost.replaceChildren();
   const editorEl = document.createElement('div');
   tileEditorHost.appendChild(editorEl);
   tileEditor = new Quill(editorEl, {
