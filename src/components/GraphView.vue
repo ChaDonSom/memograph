@@ -122,7 +122,7 @@ const CONTENT_SCORE_CAP = 12;
 const RICHNESS_SCORE_CAP = 10;
 const ENDPOINT_STEP = 12;
 const FOCUS_SCORE_BOOST_RATIO = 1.08;
-// With only a few visible blocks, cap the focus near 72% of its normal floor so two neighbors can approach one-third-screen tiles.
+// When the map has only a few blocks, lower the focus floor to 72% so two adjacent blocks can grow toward one third of the screen.
 const MIN_FOCUS_FALLBACK_RATIO = 0.72;
 const MIN_TILES_FOR_BALANCED_FOCUS = 3;
 // Empirically favors slightly wide, readable text blocks while leaving enough gutters for conduits.
@@ -349,10 +349,10 @@ const layoutModels = computed(() => {
   let remainingValue = totalValue;
   const widths = new Map();
 
+  // For multiple groups, enforce minimum widths to preserve readable columns; single-group layouts fill the stage naturally.
   for (const group of groups) {
     const minWidth = minWidths.get(group.key);
     const idealWidth = availableWidth * (Math.max(1, group.value) / totalValue);
-    // For multiple groups, enforce minimum widths to preserve readable columns; single-group layouts fill the stage naturally.
     if (idealWidth < minWidth && groups.length > 1) {
       widths.set(group.key, minWidth);
       remainingWidth -= minWidth;
