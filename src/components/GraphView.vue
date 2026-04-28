@@ -750,8 +750,9 @@ function pointInRectInterior(point, rect) {
 }
 
 function rangesOverlap(startA, endA, startB, endB) {
-  return Math.max(Math.min(startA, endA), Math.min(startB, endB)) + ROUTE_OBSTACLE_EPSILON
-    < Math.min(Math.max(startA, endA), Math.max(startB, endB));
+  const overlapStart = Math.max(Math.min(startA, endA), Math.min(startB, endB));
+  const overlapEnd = Math.min(Math.max(startA, endA), Math.max(startB, endB));
+  return overlapStart + ROUTE_OBSTACLE_EPSILON < overlapEnd;
 }
 
 function segmentIntersectsRect(start, end, rect) {
@@ -785,14 +786,18 @@ function routeIsClear(points, obstacles) {
 
 function uniqueSortedLines(values, min, max) {
   return [...new Set(values
-    .map(value => Math.round(clamp(value, min, max) * ROUTE_COORDINATE_PRECISION) / ROUTE_COORDINATE_PRECISION))]
+    .map(value => roundToRoutePrecision(clamp(value, min, max))))]
     .sort((a, b) => a - b);
+}
+
+function roundToRoutePrecision(value) {
+  return Math.round(value * ROUTE_COORDINATE_PRECISION) / ROUTE_COORDINATE_PRECISION;
 }
 
 function routePoint(point) {
   return {
-    x: Math.round(point.x * ROUTE_COORDINATE_PRECISION) / ROUTE_COORDINATE_PRECISION,
-    y: Math.round(point.y * ROUTE_COORDINATE_PRECISION) / ROUTE_COORDINATE_PRECISION,
+    x: roundToRoutePrecision(point.x),
+    y: roundToRoutePrecision(point.y),
   };
 }
 
@@ -849,7 +854,7 @@ function enqueueRouteState(queue, entry) {
   let high = queue.length;
   while (low < high) {
     const mid = Math.floor((low + high) / 2);
-    if (queue[mid].cost <= entry.cost) low = mid + 1;
+    if (queue[mid].cost >= entry.cost) low = mid + 1;
     else high = mid;
   }
   queue.splice(low, 0, entry);
@@ -881,7 +886,7 @@ function findClearOrthogonalRoute(points) {
   enqueueRouteState(queue, { state: startState, cost: 0 });
 
   while (queue.length) {
-    const { state, cost } = queue.shift();
+    const { state, cost } = queue.pop();
     if (cost !== distances.get(state)) continue;
     const [key, previousAxis] = state.split('|');
     const current = parseKey(key);
