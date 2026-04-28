@@ -49,7 +49,7 @@
           'elastic-tile--active': isTileActive(tile.id),
         }"
         :style="tile.style"
-        :aria-label="`${tile.title}. ${tile.groupLabel}. P value ${tile.scoreLabel}. Open page.`"
+        :aria-label="`${tile.title}. ${tile.groupLabel}. Page relevance score ${tile.scoreLabel}. Open page.`"
         @click="$emit('navigate', tile.id)"
         @mouseenter="activateNode(tile.id)"
         @mouseleave="clearHighlight"
@@ -120,6 +120,10 @@ const CONTENT_SCORE_CAP = 12;
 const MIN_ROUTE_CURVE = 40;
 const MAX_ROUTE_CURVE = 180;
 const ROUTE_LABEL_OFFSET = 12;
+const UNCONNECTED_SCORE_MULTIPLIER = 0.28;
+const ROUTE_LANE_COUNT = 7;
+const ROUTE_LANE_CENTER_OFFSET = 3;
+const ROUTE_LANE_SPACING = 8;
 
 function clamp(value, min, max) {
   return Math.min(max, Math.max(min, value));
@@ -131,7 +135,11 @@ function nodeTitle(node) {
 
 function nodeText(node) {
   const html = sanitizeRichHtml(normalizeEditorHtml(node.bodyHtml || ''));
-  return richTextToPlainText(html) || (/<img\s[^>]*>|<img>/i.test(html) ? 'Image-only page.' : 'No page details yet.');
+  return richTextToPlainText(html) || (hasImageOnlyContent(html) ? 'Image-only page.' : 'No page details yet.');
+}
+
+function hasImageOnlyContent(html) {
+  return /<img\s[^>]*>|<img>/i.test(html);
 }
 
 function relationLabel(edge) {
@@ -208,7 +216,7 @@ const rankedNodeModels = computed(() => {
     .map(node => {
       const hop = graphDistances.value.get(node.id) ?? Number.POSITIVE_INFINITY;
       const group = groupForNode(node, hop);
-      const score = (scores.get(node.id) || 1) * (Number.isFinite(hop) ? Math.pow(HOP_DECAY, Math.max(0, hop - 1)) : 0.28);
+      const score = (scores.get(node.id) || 1) * (Number.isFinite(hop) ? Math.pow(HOP_DECAY, Math.max(0, hop - 1)) : UNCONNECTED_SCORE_MULTIPLIER);
       return {
         id: node.id,
         node,
@@ -310,7 +318,7 @@ function connectorPath(start, end, score, index) {
   const distance = Math.hypot(dx, dy);
   const curve = clamp(distance * 0.28 + score * 0.9, MIN_ROUTE_CURVE, MAX_ROUTE_CURVE);
   const normal = distance ? { x: -dy / distance, y: dx / distance } : { x: 0, y: 1 };
-  const laneOffset = ((index % 7) - 3) * 8;
+  const laneOffset = ((index % ROUTE_LANE_COUNT) - ROUTE_LANE_CENTER_OFFSET) * ROUTE_LANE_SPACING;
   const c1 = { x: start.x + dx * 0.34 + normal.x * (curve + laneOffset), y: start.y + dy * 0.34 + normal.y * (curve + laneOffset) };
   const c2 = { x: start.x + dx * 0.66 + normal.x * (curve + laneOffset), y: start.y + dy * 0.66 + normal.y * (curve + laneOffset) };
   return `M ${start.x} ${start.y} C ${c1.x} ${c1.y}, ${c2.x} ${c2.y}, ${end.x} ${end.y}`;
