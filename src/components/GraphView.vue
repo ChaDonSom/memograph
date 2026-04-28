@@ -489,8 +489,9 @@ function compareTreemapModelsByScoreAndDate(a, b) {
 }
 
 function capTreemapModels(models) {
+  if (models.length <= TREEMAP_MAX_VISIBLE_TILES) return models;
+
   const sorted = [...models].sort(compareTreemapModelsByScoreAndDate);
-  if (sorted.length <= TREEMAP_MAX_VISIBLE_TILES) return sorted;
 
   const capped = sorted.slice(0, TREEMAP_MAX_VISIBLE_TILES);
   if (props.currentId && !capped.some(model => model.node.id === props.currentId)) {
@@ -550,6 +551,10 @@ const visibleNodeModels = computed(() => {
 
   return models;
 });
+
+const treemapNodeScores = computed(() =>
+  new Map(visibleNodeModels.value.map(model => [model.node.id, model.score]))
+);
 
 function treemapPScore(node) {
   const scoreParts = nodeScoreParts(node);
@@ -816,24 +821,40 @@ const eligibleVisibleEdges = computed(() =>
 
 function treemapEdgeRoutingScore(edge) {
   const touchesCurrent = edge.fromId === props.currentId || edge.toId === props.currentId;
-  const from = nodesById.value.get(edge.fromId);
-  const to = nodesById.value.get(edge.toId);
-  const fromScore = from ? treemapPScore(from) : 0;
-  const toScore = to ? treemapPScore(to) : 0;
+  const fromScore = treemapNodeScores.value.get(edge.fromId) || 0;
+  const toScore = treemapNodeScores.value.get(edge.toId) || 0;
   return (touchesCurrent ? CURRENT_NODE_EDGE_PRIORITY_BOOST : 0)
     + (edge.weight || DEFAULT_EDGE_WEIGHT) * 10
     + Math.max(fromScore, toScore);
+}
+
+function insertTreemapEdgeCandidate(candidates, candidate) {
+  const insertIndex = candidates.findIndex(item => candidate.score < item.score);
+  if (insertIndex === -1) candidates.push(candidate);
+  else candidates.splice(insertIndex, 0, candidate);
+}
+
+function topTreemapEdgesToRoute(edges) {
+  const candidates = [];
+  for (const edge of edges) {
+    const candidate = { edge, score: treemapEdgeRoutingScore(edge) };
+    if (candidates.length < TREEMAP_MAX_EDGES_TO_ROUTE) {
+      insertTreemapEdgeCandidate(candidates, candidate);
+    } else if (candidate.score > candidates[0].score) {
+      candidates.shift();
+      insertTreemapEdgeCandidate(candidates, candidate);
+    }
+  }
+  return candidates
+    .sort((a, b) => b.score - a.score)
+    .map(({ edge }) => edge);
 }
 
 const visibleEdges = computed(() => {
   const edges = eligibleVisibleEdges.value;
   if (!isTreemapVariant.value || edges.length <= TREEMAP_MAX_EDGES_TO_ROUTE) return edges;
 
-  return edges
-    .map(edge => ({ edge, score: treemapEdgeRoutingScore(edge) }))
-    .sort((a, b) => b.score - a.score)
-    .slice(0, TREEMAP_MAX_EDGES_TO_ROUTE)
-    .map(({ edge }) => edge);
+  return topTreemapEdgesToRoute(edges);
 });
 
 const visibleTileCount = computed(() => visibleTiles.value.length);
