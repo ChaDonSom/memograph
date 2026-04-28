@@ -464,24 +464,24 @@ function tileWeight(model) {
   return model.score > 1 ? Math.sqrt(model.score) : 1;
 }
 
-function oddClamp(value, min, max) {
+function ensureOddInRange(value, min, max) {
   const clamped = clamp(value, min, max);
   return clamped % 2 === 0 ? Math.min(max, clamped + 1) : clamped;
 }
 
 function mapColumnCount(width, visibleTileCount) {
   const preferred = width >= 980 || visibleTileCount > 20 ? MAP_MAX_COLUMNS : MAP_MIN_COLUMNS;
-  return oddClamp(preferred, MAP_MIN_COLUMNS, MAP_MAX_COLUMNS);
+  return ensureOddInRange(preferred, MAP_MIN_COLUMNS, MAP_MAX_COLUMNS);
 }
 
 function mapRowCount(visibleTileCount, columns) {
-  return oddClamp(Math.ceil((visibleTileCount + FOCUS_RESERVED_CELL_COUNT) / columns), MAP_MIN_ROWS, MAP_MAX_ROWS);
+  return ensureOddInRange(Math.ceil((visibleTileCount + FOCUS_RESERVED_CELL_COUNT) / columns), MAP_MIN_ROWS, MAP_MAX_ROWS);
 }
 
 function relationAngle(model) {
   if (model.node.id === props.currentId) return 0;
   const base = model.side === 'incoming' ? Math.PI : 0;
-  const spread = ((hashString(model.node.id) % ANGLE_SPREAD_BINS) - ANGLE_SPREAD_CENTER) * ANGLE_SPREAD_STEP;
+  const spread = ((hashValue(model.node.id) % ANGLE_SPREAD_BINS) - ANGLE_SPREAD_CENTER) * ANGLE_SPREAD_STEP;
   const hopOffset = Math.min(MAX_HOP_ANGLE_OFFSET, Math.max(0, model.hop - 1)) * HOP_ANGLE_STEP;
   return base + spread + hopOffset;
 }
@@ -494,7 +494,7 @@ function angleDistance(a, b) {
 }
 
 // Stable, small integer hash used only to fan equal-priority cards into deterministic map positions.
-function hashString(value) {
+function hashValue(value) {
   let hash = 0;
   for (const char of String(value)) hash = (hash * 31 + char.charCodeAt(0)) >>> 0;
   return hash;
@@ -567,15 +567,18 @@ function cardRectForCell(model, cell, isFocus = false) {
 function assignMapCell(model, availableCells, usedCells) {
   const preferredAngle = relationAngle(model);
   const targetRing = clamp(model.hop || 1, 1, MAP_MAX_HOP_RING);
-  const cell = availableCells
-    .filter(candidate => !usedCells.has(`${candidate.col}:${candidate.row}`))
-    .sort((a, b) =>
-      compareNumberAsc(Math.abs(a.ring - targetRing), Math.abs(b.ring - targetRing))
-      || compareNumberAsc(angleDistance(a.angle, preferredAngle), angleDistance(b.angle, preferredAngle))
-      || compareNumberAsc(a.ring, b.ring)
-      || compareNumberAsc(a.row, b.row)
-      || compareNumberAsc(a.col, b.col)
-    )[0];
+  let cell = null;
+  for (const candidate of availableCells) {
+    if (usedCells.has(`${candidate.col}:${candidate.row}`)) continue;
+    const order = cell
+      ? compareNumberAsc(Math.abs(candidate.ring - targetRing), Math.abs(cell.ring - targetRing))
+        || compareNumberAsc(angleDistance(candidate.angle, preferredAngle), angleDistance(cell.angle, preferredAngle))
+        || compareNumberAsc(candidate.ring, cell.ring)
+        || compareNumberAsc(candidate.row, cell.row)
+        || compareNumberAsc(candidate.col, cell.col)
+      : -1;
+    if (order < 0) cell = candidate;
+  }
   if (cell) usedCells.add(`${cell.col}:${cell.row}`);
   return cell;
 }
@@ -718,8 +721,9 @@ function mapLaneCoordinate(start, end, axis, index, count) {
   const min = ROUTE_EDGE_PADDING;
   const max = axis === 'x' ? stageSize.width - ROUTE_EDGE_PADDING : stageSize.height - ROUTE_EDGE_PADDING;
   const base = axis === 'x' ? (start.x + end.x) / 2 : (start.y + end.y) / 2;
+  if (count <= 1) return clamp(base, min, max);
   const available = Math.max(1, max - min);
-  const step = Math.min(LANE_STEP, available / Math.max(1, count - 1));
+  const step = Math.min(LANE_STEP, available / (count - 1));
   return clamp(base + distributeOffset(index, count, step), min, max);
 }
 
