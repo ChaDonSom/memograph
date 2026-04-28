@@ -2,8 +2,8 @@
   <div class="memo-graph-view">
     <div class="memo-graph-toolbar">
       <div>
-        <div class="memo-graph-kicker">Bounded block map</div>
-        <h2>Focused relationship masonry</h2>
+        <div class="memo-graph-kicker">{{ viewKicker }}</div>
+        <h2>{{ viewTitle }}</h2>
       </div>
       <div class="memo-graph-toolbar-summary">
         {{ visibleTiles.length }} blocks · {{ routedEdges.length }} conduits
@@ -218,6 +218,11 @@ const props = defineProps({
   nodes: { type: Array, required: true },
   edges: { type: Array, required: true },
   currentId: { type: String, default: '' },
+  variant: {
+    type: String,
+    default: 'graph',
+    validator: value => ['graph', 'treemap'].includes(value),
+  },
 });
 
 const emit = defineEmits(['navigate', 'add-relation', 'delete-page', 'update-page', 'edit-relation', 'delete-relation']);
@@ -252,6 +257,7 @@ const HTML_RICHNESS_SCORE_CAP = 10;
 const UNTITLED_PAGE_LABEL = '(untitled)';
 const ENDPOINT_STEP = 12;
 const FOCUS_SCORE_BOOST_RATIO = 1.08;
+const TREEMAP_CURRENT_SCORE_BOOST_RATIO = 1.16;
 // When the map has only a few blocks, lower the focus floor to 72% so two adjacent blocks can grow toward one third of the screen.
 const MIN_FOCUS_FALLBACK_RATIO = 0.72;
 const MIN_TILES_FOR_BALANCED_FOCUS = 3;
@@ -284,6 +290,10 @@ const ARROWHEAD_WIDTH = 10;
 const ROUTE_OBSTACLE_EPSILON = 0.01;
 const ROUTE_TURN_PENALTY = 14;
 const ROUTE_COORDINATE_PRECISION = 100;
+
+const isTreemapVariant = computed(() => props.variant === 'treemap');
+const viewKicker = computed(() => isTreemapVariant.value ? 'Block treemap' : 'Bounded block map');
+const viewTitle = computed(() => isTreemapVariant.value ? 'Relationship corridor treemap' : 'Focused relationship masonry');
 
 function clamp(value, min, max) {
   return Math.min(max, Math.max(min, value));
@@ -460,6 +470,17 @@ function focusedPScore(node) {
 }
 
 const visibleNodeModels = computed(() => {
+  if (isTreemapVariant.value) {
+    return props.nodes
+      .map(node => ({
+        node,
+        hop: node.id === props.currentId ? 0 : 1,
+        side: 'treemap',
+        score: treemapPScore(node),
+      }))
+      .sort((a, b) => b.score - a.score || (b.node.updatedAt || 0) - (a.node.updatedAt || 0));
+  }
+
   const models = props.nodes
     .map(node => {
       const distance = focusedDistances.value.get(node.id);
@@ -493,6 +514,18 @@ const visibleNodeModels = computed(() => {
 
   return models;
 });
+
+function treemapPScore(node) {
+  const stats = degreeStats.value.get(node.id) || { incoming: 0, outgoing: 0, weight: 0 };
+  const content = nodeContentStats.value.get(node.id) || { plainText: '', richness: 0 };
+  const contentLength = content.plainText.length;
+  const contentScore = clamp(Math.log2(contentLength + 1) * 1.45, 0, CONTENT_SCORE_CAP);
+  const visitScore = Math.log2((node.visits || 0) + 1) * 1.8;
+  const degreeScore = Math.log2(stats.incoming + stats.outgoing + 1) * 3 + stats.weight * 0.9;
+  const existingPScore = bestExistingPScores.value.get(node.id) || 0;
+  const baseScore = 6 + contentScore + content.richness + visitScore + degreeScore + existingPScore;
+  return node.id === props.currentId ? baseScore * TREEMAP_CURRENT_SCORE_BOOST_RATIO : baseScore;
+}
 
 function treemapGroup(models, bounds) {
   if (!models.length || bounds.width <= 0 || bounds.height <= 0) return [];
@@ -605,6 +638,21 @@ const layoutState = computed(() => {
   if (width <= 0 || height <= 0) return { models: [], corridors: [] };
 
   const models = visibleNodeModels.value;
+  if (isTreemapVariant.value) {
+    return {
+      models: treemapGroup(models, {
+        x: OUTER_PADDING,
+        y: OUTER_PADDING,
+        width,
+        height,
+        padding: internalTileGap(props.edges.length),
+        groupKey: 'treemap',
+        groupIndex: 0,
+      }),
+      corridors: [],
+    };
+  }
+
   const focus = models.find(model => model.node.id === props.currentId);
   if (!focus) return { models: [], corridors: [] };
 
@@ -677,6 +725,12 @@ const layoutModels = computed(() => layoutState.value.models);
 const routeCorridors = computed(() => layoutState.value.corridors);
 
 function roleLabel(model) {
+  if (isTreemapVariant.value) {
+    if (model.node.id === props.currentId) return 'Current page';
+    const stats = degreeStats.value.get(model.node.id) || { incoming: 0, outgoing: 0 };
+    const count = stats.incoming + stats.outgoing;
+    return `${count} relation${count === 1 ? '' : 's'}`;
+  }
   if (model.node.id === props.currentId) return 'Focused page';
   if (model.hop > 1) return `${model.hop} hops ${model.side === 'incoming' ? 'in' : 'out'}`;
   return model.side === 'incoming' ? 'Incoming' : 'Outgoing';

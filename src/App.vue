@@ -56,6 +56,12 @@
           :aria-pressed="mainView === 'graph'"
           @click="selectMainView('graph')"
         >Graph</button>
+        <button
+          type="button"
+          :class="{ active: mainView === 'treemap' }"
+          :aria-pressed="mainView === 'treemap'"
+          @click="selectMainView('treemap')"
+        >Treemap</button>
       </div>
 
       <div class="s-foot">
@@ -372,6 +378,23 @@
       :nodes="nodes"
       :edges="edges"
       :current-id="currentId"
+      variant="graph"
+      @navigate="navigateToNode"
+      @add-relation="openModal"
+      @delete-page="deletePageFromGraph"
+      @update-page="updatePageFromGraph"
+      @edit-relation="editRelationFromGraph"
+      @delete-relation="deleteRelationFromGraph"
+    />
+  </div>
+
+  <!-- ── Main: treemap relationship overlay ─────────────── -->
+  <div class="main" v-else-if="current && mainView === 'treemap'">
+    <GraphView
+      :nodes="nodes"
+      :edges="edges"
+      :current-id="currentId"
+      variant="treemap"
       @navigate="navigateToNode"
       @add-relation="openModal"
       @delete-page="deletePageFromGraph"
