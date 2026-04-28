@@ -202,6 +202,7 @@ const SAME_GROUP_ROUTE_PADDING = 24;
 /** Same-group routes use tighter offsets because their tile-to-tile gaps are already narrow. */
 const SAME_GROUP_LANE_FACTOR = 0.45;
 const LANE_STEP = 10;
+const LABEL_DEFAULT_OFFSET = 12;
 
 function clamp(value, min, max) {
   return Math.min(max, Math.max(min, value));
@@ -607,9 +608,9 @@ function horizontalRouteSides(from, to) {
 
 function sameGroupRouteSides(from, to) {
   if (from.x + from.width <= to.x) return { startSide: 'right', endSide: 'left', axis: 'x' };
-  if (to.x + to.width <= from.x) return { startSide: 'left', endSide: 'right', axis: 'x' };
-  if (from.y + from.height <= to.y) return { startSide: 'bottom', endSide: 'top', axis: 'y' };
-  if (to.y + to.height <= from.y) return { startSide: 'top', endSide: 'bottom', axis: 'y' };
+  else if (to.x + to.width <= from.x) return { startSide: 'left', endSide: 'right', axis: 'x' };
+  else if (from.y + from.height <= to.y) return { startSide: 'bottom', endSide: 'top', axis: 'y' };
+  else if (to.y + to.height <= from.y) return { startSide: 'top', endSide: 'bottom', axis: 'y' };
   return { ...horizontalRouteSides(from, to), axis: 'overflow' };
 }
 
@@ -650,7 +651,8 @@ function corridorIndexesBetween(from, to) {
 }
 
 /**
- * Returns a symmetric offset around zero for evenly spacing multiple endpoints or lanes.
+ * Returns a symmetric offset around zero for evenly spacing endpoints or lanes.
+ * The step controls pixel spacing; route lanes use a smaller step than card-edge endpoints.
  */
 function distributeOffset(index, count, step = ENDPOINT_STEP) {
   return (index - (count - 1) / 2) * step;
@@ -666,9 +668,9 @@ function roundedOrthogonalPath(points) {
     const prev = points[i - 1];
     const current = points[i];
     const next = points[i + 1];
-    const incoming = Math.abs(current.x - prev.x) + Math.abs(current.y - prev.y);
-    const outgoing = Math.abs(next.x - current.x) + Math.abs(next.y - current.y);
-    const radius = Math.min(ROUTE_CORNER_RADIUS, incoming / 2, outgoing / 2);
+    const incomingDistance = Math.abs(current.x - prev.x) + Math.abs(current.y - prev.y);
+    const outgoingDistance = Math.abs(next.x - current.x) + Math.abs(next.y - current.y);
+    const radius = Math.min(ROUTE_CORNER_RADIUS, incomingDistance / 2, outgoingDistance / 2);
     if (radius <= 0) {
       commands.push(`L ${current.x} ${current.y}`);
       continue;
@@ -842,7 +844,7 @@ function routeLabelPlacement(route) {
     .filter(segment => !segment.vertical && segment.length >= 42)
     .sort((a, b) => b.length - a.length)[0];
   const segment = horizontal || segments.sort((a, b) => b.length - a.length)[0];
-  if (!segment) return { x: route.endX, y: route.endY - 12, vertical: false, rotation: 0 };
+  if (!segment) return { x: route.endX, y: route.endY - LABEL_DEFAULT_OFFSET, vertical: false, rotation: 0 };
   const vertical = !horizontal && segment.vertical && segment.length >= MIN_VERTICAL_LABEL_LENGTH;
   return {
     x: (segment.start.x + segment.end.x) / 2,

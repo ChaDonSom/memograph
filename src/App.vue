@@ -1647,7 +1647,10 @@ function deletePageFromGraph(id) {
 function graphBodyHtmlFromText(bodyText) {
   const normalized = normalizeNewlines(bodyText).trim();
   if (!normalized) return '';
-  return `<p>${escapeHtml(normalized).replace(/\n/g, '<br>')}</p>`;
+  return normalized
+    .split(/\n{2,}/)
+    .map(paragraph => `<p>${escapeHtml(paragraph.trim()).replace(/\n/g, '<br>')}</p>`)
+    .join('');
 }
 
 /**
