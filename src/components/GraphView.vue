@@ -101,7 +101,7 @@
         @mouseenter="activateNode(tile.id)"
         @mouseleave="clearHighlight"
         @focusin="activateNode(tile.id)"
-        @focusout="clearHighlight"
+        @focusout="clearHighlightIfFocusLeaves"
       >
         <span class="memo-map-tile-topline">
           <span>{{ tile.roleLabel }}</span>
@@ -160,7 +160,7 @@
         @mouseenter="activateRoute(label.route)"
         @mouseleave="clearHighlight"
         @focusin="activateRoute(label.route)"
-        @focusout="clearHighlight"
+        @focusout="clearHighlightIfFocusLeaves"
       >
         <button type="button" class="memo-map-route-label-button">
           {{ label.label }}
@@ -183,7 +183,7 @@ import { hierarchy, treemap, treemapSquarify } from 'd3-hierarchy';
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue';
 import { DEFAULT_EDGE_WEIGHT, pScore, timeAgo } from '../utils/scoring.js';
 import { normalizeEditorHtml, sanitizeRichHtml } from '../utils/sanitize.js';
-import { richTextFirstLine, richTextToPlainText, truncateText } from '../utils/text.js';
+import { richTextFirstLine, truncateText } from '../utils/text.js';
 
 const props = defineProps({
   nodes: { type: Array, required: true },
@@ -259,8 +259,46 @@ function nodeBodyHtml(node) {
   return sanitizeRichHtml(normalizeEditorHtml(node.bodyHtml || ''));
 }
 
+function preservePlainTextFromHtml(html) {
+  if (!html) return '';
+
+  const parser = new DOMParser();
+  const doc = parser.parseFromString(html, 'text/html');
+  const blockTags = new Set([
+    'address', 'article', 'aside', 'blockquote', 'div', 'dl', 'dt', 'dd', 'fieldset', 'figcaption',
+    'figure', 'footer', 'form', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'header', 'hr', 'li', 'main',
+    'nav', 'ol', 'p', 'pre', 'section', 'table', 'tbody', 'td', 'tfoot', 'th', 'thead', 'tr', 'ul',
+  ]);
+
+  function walk(node) {
+    if (node.nodeType === Node.TEXT_NODE) {
+      return node.textContent?.replace(/[^\S\n]+/g, ' ') || '';
+    }
+
+    if (node.nodeType !== Node.ELEMENT_NODE) return '';
+
+    const tag = node.tagName.toLowerCase();
+    if (tag === 'br') return '\n';
+
+    const content = Array.from(node.childNodes).map(walk).join('');
+    if (blockTags.has(tag)) {
+      const trimmedContent = content.replace(/^\n+|\n+$/g, '');
+      return trimmedContent ? `\n\n${trimmedContent}\n\n` : '\n\n';
+    }
+
+    return content;
+  }
+
+  return walk(doc.body)
+    .replace(/\r\n?/g, '\n')
+    .replace(/[ \t]+\n/g, '\n')
+    .replace(/\n[ \t]+/g, '\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
 function plainTextFromHtml(html) {
-  return richTextToPlainText(html) || (/<img\s[^>]*>|<img>/i.test(html) ? 'Image-only page.' : '');
+  return preservePlainTextFromHtml(html) || (/<img\s[^>]*>|<img>/i.test(html) ? 'Image-only page.' : '');
 }
 
 function richnessFromHtml(html) {
@@ -301,10 +339,19 @@ const nodeContentStats = computed(() =>
 const degreeStats = computed(() => {
   const stats = new Map(props.nodes.map(node => [node.id, { incoming: 0, outgoing: 0, weight: 0 }]));
   for (const edge of props.edges) {
-    stats.get(edge.fromId).outgoing++;
-    stats.get(edge.fromId).weight += edge.weight || DEFAULT_EDGE_WEIGHT;
-    stats.get(edge.toId).incoming++;
-    stats.get(edge.toId).weight += edge.weight || DEFAULT_EDGE_WEIGHT;
+    const fromStats = stats.get(edge.fromId);
+    const toStats = stats.get(edge.toId);
+    const weight = edge.weight || DEFAULT_EDGE_WEIGHT;
+
+    if (fromStats) {
+      fromStats.outgoing++;
+      fromStats.weight += weight;
+    }
+
+    if (toStats) {
+      toStats.incoming++;
+      toStats.weight += weight;
+    }
   }
   return stats;
 });
@@ -1187,6 +1234,11 @@ function activateRoute(route) {
 function clearHighlight() {
   activeNodeId.value = '';
   activeEdgeId.value = '';
+}
+
+function clearHighlightIfFocusLeaves(event) {
+  const nextTarget = event.relatedTarget;
+  if (!nextTarget || !event.currentTarget.contains(nextTarget)) clearHighlight();
 }
 
 function routeTouchesActiveNode(route) {

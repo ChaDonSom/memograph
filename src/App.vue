@@ -43,15 +43,17 @@
       >{{ n.title || '(untitled)' }}</div>
       </div>
 
-      <div class="s-view-toggle" aria-label="Main view">
+      <div class="s-view-toggle" role="group" aria-label="Main view">
         <button
           type="button"
           :class="{ active: mainView === 'editor' }"
+          :aria-pressed="mainView === 'editor'"
           @click="selectMainView('editor')"
         >Editor</button>
         <button
           type="button"
           :class="{ active: mainView === 'graph' }"
+          :aria-pressed="mainView === 'graph'"
           @click="selectMainView('graph')"
         >Graph</button>
       </div>
@@ -1179,7 +1181,11 @@ function scheduleConnectorUpdate() {
 
 async function selectMainView(view) {
   if (mainView.value === view) return;
-  if (mainView.value === 'editor') flush();
+  if (mainView.value === 'editor') {
+    flush();
+    removeConnectorScrollListener();
+    unobserveConnectorTargets();
+  }
   mainView.value = view;
   if (view === 'editor') {
     await nextTick();
@@ -1194,6 +1200,12 @@ function observeConnectorTargets() {
   if (!connectorResizeObserver) return;
   if (relationshipCanvasEl.value) connectorResizeObserver.observe(relationshipCanvasEl.value);
   if (centerPanelEl.value) connectorResizeObserver.observe(centerPanelEl.value);
+}
+
+function unobserveConnectorTargets() {
+  if (!connectorResizeObserver) return;
+  if (relationshipCanvasEl.value) connectorResizeObserver.unobserve(relationshipCanvasEl.value);
+  if (centerPanelEl.value) connectorResizeObserver.unobserve(centerPanelEl.value);
 }
 
 function addConnectorScrollListener() {
