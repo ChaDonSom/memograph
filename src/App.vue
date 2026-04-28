@@ -1647,13 +1647,17 @@ function graphBodyHtmlFromText(bodyText) {
   return `<p>${escapeHtml(normalized).replace(/\n/g, '<br>')}</p>`;
 }
 
+function graphDeltaFromText(bodyText) {
+  return JSON.stringify({ ops: [{ insert: bodyText ? `${bodyText}\n` : '\n' }] });
+}
+
 function updatePageFromGraph({ id, title, bodyText }) {
   const node = findNode(id);
   if (!node) return;
   const normalizedBody = normalizeNewlines(bodyText).trim();
   node.title = title.trim();
   node.bodyHtml = sanitizeRichHtml(graphBodyHtmlFromText(normalizedBody));
-  node.bodyDelta = JSON.stringify({ ops: [{ insert: normalizedBody ? `${normalizedBody}\n` : '\n' }] });
+  node.bodyDelta = graphDeltaFromText(normalizedBody);
   node.updatedAt = Date.now();
   persist();
 }

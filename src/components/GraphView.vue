@@ -197,6 +197,7 @@ const ROUTE_EDGE_PADDING = 18;
 const ROUTE_CARD_CLEARANCE = 11;
 const ROUTE_CORNER_RADIUS = 9;
 const SAME_GROUP_ROUTE_PADDING = 24;
+const SAME_GROUP_LANE_FACTOR = 0.45;
 const LANE_STEP = 10;
 
 function clamp(value, min, max) {
@@ -768,13 +769,13 @@ const routedEdges = computed(() => {
     } else if (plan.axis === 'y') {
       const top = plan.startSide === 'bottom' ? from.y + from.height : to.y + to.height;
       const bottom = plan.startSide === 'bottom' ? to.y : from.y;
-      const laneOffset = (endpointOffsets.get(`${edge.id}:start`) || 0) * 0.45;
+      const laneOffset = (endpointOffsets.get(`${edge.id}:start`) || 0) * SAME_GROUP_LANE_FACTOR;
       const midY = (top + bottom) / 2 + laneOffset;
       points = [start, { x: start.x, y: midY }, { x: end.x, y: midY }, end];
     } else if (plan.axis === 'x') {
       const left = plan.startSide === 'right' ? from.x + from.width : to.x + to.width;
       const right = plan.startSide === 'right' ? to.x : from.x;
-      const laneOffset = (endpointOffsets.get(`${edge.id}:start`) || 0) * 0.45;
+      const laneOffset = (endpointOffsets.get(`${edge.id}:start`) || 0) * SAME_GROUP_LANE_FACTOR;
       const midX = (left + right) / 2 + laneOffset;
       points = [start, { x: midX, y: start.y }, { x: midX, y: end.y }, end];
     } else {
