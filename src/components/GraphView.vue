@@ -261,14 +261,19 @@ const LANE_STEP = 12;
 const LABEL_DEFAULT_OFFSET = 12;
 const LABEL_STACK_STEP = 18;
 const LABEL_COLLISION_GAP = 8;
+const LABEL_MIN_WIDTH = 46;
 const LABEL_MAX_WIDTH = 170;
 const LABEL_HEIGHT = 24;
+const LABEL_CHARACTER_WIDTH_ESTIMATE = 6.5;
+const LABEL_HORIZONTAL_PADDING_ESTIMATE = 22;
+const LABEL_PLACEMENT_MAX_ATTEMPTS = 8;
 const ROUTE_HIT_PADDING = 10;
 const ARROWHEAD_LENGTH = 12;
 const ARROWHEAD_WIDTH = 10;
 const ARROWHEAD_ENDPOINT_GAP = 2;
 const ARROWHEAD_COLLISION_STEP = 14;
 const ARROWHEAD_LABEL_RADIUS = 28;
+const ARROWHEAD_PLACEMENT_MAX_ATTEMPTS = 6;
 const ROUTE_OBSTACLE_EPSILON = 0.01;
 const ROUTE_TURN_PENALTY = 14;
 const ROUTE_COORDINATE_PRECISION = 100;
@@ -1211,7 +1216,10 @@ function routeLabelPlacement(route) {
 }
 
 function labelBounds(label) {
-  const width = Math.min(LABEL_MAX_WIDTH, Math.max(46, label.label.length * 6.5 + 22));
+  const width = Math.min(
+    LABEL_MAX_WIDTH,
+    Math.max(LABEL_MIN_WIDTH, label.label.length * LABEL_CHARACTER_WIDTH_ESTIMATE + LABEL_HORIZONTAL_PADDING_ESTIMATE)
+  );
   const halfWidth = label.vertical ? LABEL_HEIGHT / 2 : width / 2;
   const halfHeight = label.vertical ? width / 2 : LABEL_HEIGHT / 2;
   return {
@@ -1252,7 +1260,7 @@ const routeLabels = computed(() => {
     };
 
     let attempt = 0;
-    while (placed.some(existing => boundsOverlap(labelBounds(label), labelBounds(existing))) && attempt < 8) {
+    while (placed.some(existing => boundsOverlap(labelBounds(label), labelBounds(existing))) && attempt < LABEL_PLACEMENT_MAX_ATTEMPTS) {
       const direction = attempt % 2 === 0 ? 1 : -1;
       const distance = Math.ceil((attempt + 1) / 2) * LABEL_STACK_STEP;
       label.x = placement.x + label.normal.x * direction * distance;
@@ -1339,7 +1347,7 @@ const routeArrowheads = computed(() => {
     let placement = pointBackAlongRoute(route.points, distanceFromEnd);
     while (
       labels.some(label => distanceBetweenPoints(label, placement) < ARROWHEAD_LABEL_RADIUS)
-      && distanceFromEnd < ARROWHEAD_ENDPOINT_GAP + ARROWHEAD_COLLISION_STEP * 6
+      && distanceFromEnd < ARROWHEAD_ENDPOINT_GAP + ARROWHEAD_COLLISION_STEP * ARROWHEAD_PLACEMENT_MAX_ATTEMPTS
     ) {
       distanceFromEnd += ARROWHEAD_COLLISION_STEP;
       placement = pointBackAlongRoute(route.points, distanceFromEnd);
@@ -1425,11 +1433,10 @@ function initTileEditor() {
       },
     },
   });
-  if (tileDraft.bodyDelta && !restoreEditorContents(tileEditor, tileDraft.bodyDelta)) {
-    tileEditor.clipboard.dangerouslyPasteHTML(sanitizeRichHtml(normalizeEditorHtml(tileDraft.bodyHtml || '')));
-  } else if (!tileDraft.bodyDelta && tileDraft.bodyHtml) {
+  const restoredDelta = tileDraft.bodyDelta && restoreEditorContents(tileEditor, tileDraft.bodyDelta);
+  if (!restoredDelta && tileDraft.bodyHtml) {
     tileEditor.clipboard.dangerouslyPasteHTML(sanitizeRichHtml(normalizeEditorHtml(tileDraft.bodyHtml)));
-  } else if (tileDraft.fallbackText) {
+  } else if (!restoredDelta && tileDraft.fallbackText) {
     tileEditor.setText(tileDraft.fallbackText);
   }
   attachTileImageClickHandlers();
