@@ -56,6 +56,12 @@
           :aria-pressed="mainView === 'graph'"
           @click="selectMainView('graph')"
         >Graph</button>
+        <button
+          type="button"
+          :class="{ active: mainView === 'elastic' }"
+          :aria-pressed="mainView === 'elastic'"
+          @click="selectMainView('elastic')"
+        >Elastic</button>
       </div>
 
       <div class="s-foot">
@@ -381,6 +387,19 @@
     />
   </div>
 
+  <!-- ── Main: elastic hierarchy preview ─────────────── -->
+  <div class="main" v-else-if="current && mainView === 'elastic'">
+    <ElasticHierarchyView
+      :nodes="nodes"
+      :edges="edges"
+      :current-id="currentId"
+      @navigate="navigateToNode"
+      @add-relation="openModal"
+      @edit-relation="editRelationFromGraph"
+      @delete-relation="deleteRelationFromGraph"
+    />
+  </div>
+
   <!-- ── Main: empty state ────────────────────── -->
   <div class="main" v-else>
     <div class="empty">
@@ -490,6 +509,7 @@ import {
 import { DEFAULT_EDGE_WEIGHT, pScore, timeAgo } from './utils/scoring.js';
 
 const GraphView = defineAsyncComponent(() => import('./components/GraphView.vue'));
+const ElasticHierarchyView = defineAsyncComponent(() => import('./components/ElasticHierarchyView.vue'));
 
 // Extend Quill's Image blot to persist a width style attribute.
 const BaseImageBlot = Quill.import('formats/image');
