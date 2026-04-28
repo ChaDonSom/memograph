@@ -445,7 +445,7 @@ const visibleNodeModels = computed(() => {
 });
 
 function groupWeight(group) {
-  if (group.value == null || !Number.isFinite(group.value)) return 1;
+  if (!Number.isFinite(group.value)) return 1;
   return Math.max(1, Math.sqrt(group.value));
 }
 
@@ -736,7 +736,7 @@ function laneCoordinate(corridor, index, count) {
 }
 
 function localLoopX(rect, laneIndex, side) {
-  // Tile rects normally carry group bounds; fall back to card bounds for defensive pure-helper reuse.
+  // Same-column routes use column bounds; fallback keeps routes valid for legacy rects without those fields.
   const groupX = Number.isFinite(rect.groupX) ? rect.groupX : rect.x;
   const groupWidth = Number.isFinite(rect.groupWidth) ? rect.groupWidth : rect.width;
   const offset = LOCAL_LOOP_GAP + laneIndex * LANE_STEP;
@@ -787,9 +787,7 @@ function labelRotation(vertical, startY, endY) {
 }
 
 function compareRoutePlansByYMidpoint(a, b) {
-  return (rectCenter(a.from).y + rectCenter(a.to).y)
-    - (rectCenter(b.from).y + rectCenter(b.to).y)
-    || a.edge.id.localeCompare(b.edge.id);
+  return a.sortY - b.sortY || a.edge.id.localeCompare(b.edge.id);
 }
 
 const routedEdges = computed(() => {
@@ -797,7 +795,14 @@ const routedEdges = computed(() => {
     const from = tileRects.value.get(edge.fromId);
     const to = tileRects.value.get(edge.toId);
     const groupDistance = Math.abs(from.groupIndex - to.groupIndex);
-    return { edge, from, to, groupDistance, ...routeSideForGroups(from, to) };
+    return {
+      edge,
+      from,
+      to,
+      groupDistance,
+      sortY: rectCenter(from).y + rectCenter(to).y,
+      ...routeSideForGroups(from, to),
+    };
   });
 
   const endpointOffsets = new Map();
