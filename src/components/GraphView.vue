@@ -222,6 +222,7 @@ const tileImageResizeBar = reactive({ visible: false, top: 0, left: 0, imageEl: 
 let resizeObserver = null;
 let tileEditor = null;
 let tileEditorHost = null;
+let tileImageClickHandler = null;
 
 /**
  * Corridor sizing starts with a small base whitespace and grows linearly per shared route.
@@ -274,6 +275,8 @@ const ARROWHEAD_ENDPOINT_GAP = 2;
 const ARROWHEAD_COLLISION_STEP = 14;
 const ARROWHEAD_LABEL_RADIUS = 28;
 const ARROWHEAD_PLACEMENT_MAX_ATTEMPTS = 6;
+const ARROWHEAD_ENDPOINT_QUANTIZATION_GRID = 4;
+const MIN_SEGMENT_LENGTH = 1;
 const ROUTE_OBSTACLE_EPSILON = 0.01;
 const ROUTE_TURN_PENALTY = 14;
 const ROUTE_COORDINATE_PRECISION = 100;
@@ -1260,12 +1263,14 @@ const routeLabels = computed(() => {
     };
 
     let attempt = 0;
-    while (placed.some(existing => boundsOverlap(labelBounds(label), labelBounds(existing))) && attempt < LABEL_PLACEMENT_MAX_ATTEMPTS) {
+    let currentBounds = labelBounds(label);
+    while (placed.some(existing => boundsOverlap(currentBounds, labelBounds(existing))) && attempt < LABEL_PLACEMENT_MAX_ATTEMPTS) {
       const direction = attempt % 2 === 0 ? 1 : -1;
       const distance = Math.ceil((attempt + 1) / 2) * LABEL_STACK_STEP;
       label.x = placement.x + label.normal.x * direction * distance;
       label.y = placement.y + label.normal.y * direction * distance;
       nudgeLabelIntoStage(label);
+      currentBounds = labelBounds(label);
       attempt++;
     }
 
@@ -1308,7 +1313,7 @@ function pointBackAlongRoute(points, distanceFromEnd) {
 
   const start = points[0];
   const end = points[points.length - 1];
-  const length = Math.max(1, distanceBetweenPoints(start, end));
+  const length = Math.max(MIN_SEGMENT_LENGTH, distanceBetweenPoints(start, end));
   return {
     x: end.x,
     y: end.y,
@@ -1340,7 +1345,7 @@ const routeArrowheads = computed(() => {
   const placedByEndpoint = new Map();
   const labels = routeLabels.value.map(label => ({ x: label.x, y: label.y }));
   return routedEdges.value.map(route => {
-    const endpointKey = `${Math.round(route.endX / 4) * 4}:${Math.round(route.endY / 4) * 4}`;
+    const endpointKey = `${Math.round(route.endX / ARROWHEAD_ENDPOINT_QUANTIZATION_GRID) * ARROWHEAD_ENDPOINT_QUANTIZATION_GRID}:${Math.round(route.endY / ARROWHEAD_ENDPOINT_QUANTIZATION_GRID) * ARROWHEAD_ENDPOINT_QUANTIZATION_GRID}`;
     const endpointCount = placedByEndpoint.get(endpointKey) || 0;
     placedByEndpoint.set(endpointKey, endpointCount + 1);
     let distanceFromEnd = ARROWHEAD_ENDPOINT_GAP + endpointCount * ARROWHEAD_COLLISION_STEP;
@@ -1389,13 +1394,24 @@ function showTileImageResizeBar(imgEl) {
 
 function attachTileImageClickHandlers() {
   if (!tileEditor) return;
-  tileEditor.root.addEventListener('click', (event) => {
+  if (tileImageClickHandler) {
+    tileEditor.root.removeEventListener('click', tileImageClickHandler);
+  }
+  tileImageClickHandler = (event) => {
     if (event.target.tagName === 'IMG') {
       showTileImageResizeBar(event.target);
     } else {
       hideTileImageResizeBar();
     }
-  });
+  };
+  tileEditor.root.addEventListener('click', tileImageClickHandler);
+}
+
+function removeTileImageClickHandlers() {
+  if (tileEditor && tileImageClickHandler) {
+    tileEditor.root.removeEventListener('click', tileImageClickHandler);
+  }
+  tileImageClickHandler = null;
 }
 
 function resizeSelectedTileImage(widthPct) {
@@ -1433,10 +1449,10 @@ function initTileEditor() {
       },
     },
   });
-  const restoredDelta = tileDraft.bodyDelta && restoreEditorContents(tileEditor, tileDraft.bodyDelta);
-  if (!restoredDelta && tileDraft.bodyHtml) {
+  const deltaRestored = tileDraft.bodyDelta && restoreEditorContents(tileEditor, tileDraft.bodyDelta);
+  if (!deltaRestored && tileDraft.bodyHtml) {
     tileEditor.clipboard.dangerouslyPasteHTML(sanitizeRichHtml(normalizeEditorHtml(tileDraft.bodyHtml)));
-  } else if (!restoredDelta && tileDraft.fallbackText) {
+  } else if (!deltaRestored && tileDraft.fallbackText) {
     tileEditor.setText(tileDraft.fallbackText);
   }
   attachTileImageClickHandlers();
@@ -1453,6 +1469,7 @@ async function startTileEdit(tile) {
 }
 
 function cancelTileEdit() {
+  removeTileImageClickHandlers();
   hideTileImageResizeBar();
   tileEditor = null;
   editingTileId.value = '';
