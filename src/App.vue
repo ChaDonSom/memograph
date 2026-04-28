@@ -1641,12 +1641,18 @@ function deletePageFromGraph(id) {
   deleteRelatedPage(id);
 }
 
+/**
+ * Converts graph-card plain text edits into sanitized editor HTML.
+ */
 function graphBodyHtmlFromText(bodyText) {
   const normalized = normalizeNewlines(bodyText).trim();
   if (!normalized) return '';
   return `<p>${escapeHtml(normalized).replace(/\n/g, '<br>')}</p>`;
 }
 
+/**
+ * Stores graph-card plain text edits in the same Quill Delta shape used by the editor.
+ */
 function graphDeltaFromText(bodyText) {
   return JSON.stringify({ ops: [{ insert: bodyText ? `${bodyText}\n` : '\n' }] });
 }

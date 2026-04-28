@@ -170,8 +170,8 @@ const editingTileId = ref('');
 const tileDraft = reactive({ title: '', bodyText: '' });
 let resizeObserver = null;
 
-const BASE_CORRIDOR_GAP = 12;
-const CORRIDOR_WIDTH_PER_ROUTE = 7;
+const BASE_CORRIDOR_GAP = 12; // Minimum whitespace preserved between block groups before route lanes are added.
+const CORRIDOR_WIDTH_PER_ROUTE = 7; // Extra corridor width assigned for each route sharing that whitespace.
 const OUTER_PADDING = 18;
 const PERIMETER_ROUTE_LANE = 12;
 const MIN_SIDE_WIDTH = 150;
@@ -197,7 +197,7 @@ const ROUTE_EDGE_PADDING = 18;
 const ROUTE_CARD_CLEARANCE = 11;
 const ROUTE_CORNER_RADIUS = 9;
 const SAME_GROUP_ROUTE_PADDING = 24;
-const SAME_GROUP_LANE_FACTOR = 0.45;
+const SAME_GROUP_LANE_FACTOR = 0.45; // Same-group routes use tighter offsets because their tile-to-tile gaps are already narrow.
 const LANE_STEP = 10;
 
 function clamp(value, min, max) {
@@ -585,10 +585,6 @@ const visibleEdges = computed(() =>
     .filter(edge => tileRects.value.has(edge.fromId) && tileRects.value.has(edge.toId))
 );
 
-function distributeOffset(index, count, step = ENDPOINT_STEP) {
-  return (index - (count - 1) / 2) * step;
-}
-
 function rectCenter(rect) {
   return {
     x: rect.x + rect.width / 2,
@@ -650,6 +646,16 @@ function corridorIndexesBetween(from, to) {
   return indexes;
 }
 
+/**
+ * Returns a symmetric offset around zero for evenly spacing multiple endpoints or lanes.
+ */
+function distributeOffset(index, count, step = ENDPOINT_STEP) {
+  return (index - (count - 1) / 2) * step;
+}
+
+/**
+ * Builds an SVG path from axis-aligned points and rounds each turn with a quadratic curve.
+ */
 function roundedOrthogonalPath(points) {
   if (points.length < 2) return '';
   const commands = [`M ${points[0].x} ${points[0].y}`];
@@ -807,6 +813,9 @@ const routedEdges = computed(() => {
   });
 });
 
+/**
+ * Chooses the clearest label position, preferring long horizontal route segments before vertical fallbacks.
+ */
 function routeLabelPlacement(route) {
   const segments = [];
   for (let index = 1; index < route.points.length; index++) {
