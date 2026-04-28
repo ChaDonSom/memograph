@@ -1300,6 +1300,9 @@ const routeLabels = computed(() => {
 
 /**
  * Calculates Euclidean distance between points shaped as { x, y }.
+ * @param {{ x: number, y: number }} a
+ * @param {{ x: number, y: number }} b
+ * @returns {number}
  */
 function distanceBetweenPoints(a, b) {
   return Math.hypot(a.x - b.x, a.y - b.y);
@@ -1364,6 +1367,11 @@ function arrowheadPolygon(point, unit) {
   return `${point.x},${point.y} ${left.x},${left.y} ${right.x},${right.y}`;
 }
 
+/**
+ * Snaps arrow endpoint coordinates to a small grid so nearby arrowheads share a collision group.
+ * @param {number} value
+ * @returns {number}
+ */
 function quantizeArrowheadEndpoint(value) {
   return Math.round(value / ARROWHEAD_SNAP_GRID) * ARROWHEAD_SNAP_GRID;
 }
@@ -1452,6 +1460,9 @@ function resizeSelectedTileImage(widthPct) {
 
 /**
  * Restores Quill contents from a serialized Delta and reports whether it succeeded.
+ * @param {Quill} quill
+ * @param {string} serializedDelta
+ * @returns {boolean}
  */
 function restoreEditorContents(quill, serializedDelta) {
   try {
