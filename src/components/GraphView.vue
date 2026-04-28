@@ -221,6 +221,13 @@ const MIN_FOCUS_HEIGHT = 190;
 const FOCUS_WIDTH_RATIO = 0.3;
 const FOCUS_HEIGHT_RATIO = 0.34;
 const MIN_FOCUS_WIDTH = 230;
+const MAP_CARD_MIN_WIDTH_RATIO = 0.74;
+const MAP_CARD_MAX_WIDTH_RATIO = 0.96;
+const MAP_CARD_BASE_WIDTH_RATIO = 0.72;
+const MAP_CARD_WIDTH_WEIGHT_SCALE = 0.06;
+const MAP_CARD_MIN_HEIGHT_RATIO = 0.62;
+const MAP_CARD_MAX_HEIGHT_RATIO = 0.94;
+const MAP_CARD_HEIGHT_WEIGHT_SCALE = 0.08;
 const MAX_VISIBLE_TILES = 28;
 const FOCUS_MIN_SCORE = 36;
 const HOP_DECAY = 0.58;
@@ -464,6 +471,10 @@ function tileWeight(model) {
   return model.score > 1 ? Math.sqrt(model.score) : 1;
 }
 
+/**
+ * Map grids must be odd-sized so the focused block can occupy a true center cell.
+ * If adding one would exceed the maximum, the max is already odd and remains valid.
+ */
 function ensureOddInRange(value, min, max) {
   const clamped = clamp(value, min, max);
   return clamped % 2 === 0 ? Math.min(max, clamped + 1) : clamped;
@@ -486,14 +497,17 @@ function relationAngle(model) {
   return base + spread + hopOffset;
 }
 
-function angleDistance(a, b) {
+function angleDistance(angleA, angleB) {
   // Minimum distance between two directions on a circle, including wraparound across 0/2π.
   const fullCircle = Math.PI * 2;
-  const delta = Math.abs(((a - b + Math.PI) % fullCircle + fullCircle) % fullCircle - Math.PI);
+  const delta = Math.abs(((angleA - angleB + Math.PI) % fullCircle + fullCircle) % fullCircle - Math.PI);
   return delta;
 }
 
-// Stable, small integer hash used only to fan equal-priority cards into deterministic map positions.
+/**
+ * Simple non-cryptographic string hash used only to fan equal-priority cards
+ * into deterministic map positions.
+ */
 function hashValue(value) {
   let hash = 0;
   for (const char of String(value)) hash = (hash * 31 + char.charCodeAt(0)) >>> 0;
@@ -547,8 +561,20 @@ function mergedCellBounds(cells) {
 
 function cardRectForCell(model, cell, isFocus = false) {
   const weight = tileWeight(model);
-  const widthRatio = isFocus ? FOCUS_WIDTH_RATIO : clamp(0.72 + weight * 0.06, 0.74, 0.96);
-  const heightRatio = isFocus ? FOCUS_HEIGHT_RATIO : clamp(0.62 + weight * 0.08, 0.62, 0.94);
+  const widthRatio = isFocus
+    ? FOCUS_WIDTH_RATIO
+    : clamp(
+      MAP_CARD_BASE_WIDTH_RATIO + weight * MAP_CARD_WIDTH_WEIGHT_SCALE,
+      MAP_CARD_MIN_WIDTH_RATIO,
+      MAP_CARD_MAX_WIDTH_RATIO
+    );
+  const heightRatio = isFocus
+    ? FOCUS_HEIGHT_RATIO
+    : clamp(
+      MAP_CARD_MIN_HEIGHT_RATIO + weight * MAP_CARD_HEIGHT_WEIGHT_SCALE,
+      MAP_CARD_MIN_HEIGHT_RATIO,
+      MAP_CARD_MAX_HEIGHT_RATIO
+    );
   const width = isFocus
     ? clamp(stageSize.width * FOCUS_WIDTH_RATIO, Math.min(MIN_FOCUS_WIDTH, cell.width), cell.width)
     : clamp(cell.width * widthRatio, Math.min(MIN_MAP_TILE_WIDTH, cell.width), cell.width);
@@ -570,6 +596,7 @@ function assignMapCell(model, availableCells, usedCells) {
   let cell = null;
   for (const candidate of availableCells) {
     if (usedCells.has(`${candidate.col}:${candidate.row}`)) continue;
+    // Prefer the requested hop ring, then relation angle, then stable map order.
     const order = cell
       ? compareNumberAsc(Math.abs(candidate.ring - targetRing), Math.abs(cell.ring - targetRing))
         || compareNumberAsc(angleDistance(candidate.angle, preferredAngle), angleDistance(cell.angle, preferredAngle))
@@ -586,11 +613,11 @@ function assignMapCell(model, availableCells, usedCells) {
 const layoutState = computed(() => {
   const width = stageSize.width - OUTER_PADDING * 2;
   const height = stageSize.height - OUTER_PADDING * 2;
-  if (width <= 0 || height <= 0) return { models: [], corridors: [] };
+  if (width <= 0 || height <= 0) return { models: [] };
 
   const models = visibleNodeModels.value;
   const focus = models.find(model => model.node.id === props.currentId);
-  if (!focus) return { models: [], corridors: [] };
+  if (!focus) return { models: [] };
 
   const columns = mapColumnCount(width, models.length);
   const rows = mapRowCount(models.length, columns);
@@ -624,7 +651,7 @@ const layoutState = computed(() => {
     });
   }
 
-  return { models: laidOut, corridors: [] };
+  return { models: laidOut };
 });
 
 const layoutModels = computed(() => layoutState.value.models);
