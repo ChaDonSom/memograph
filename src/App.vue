@@ -1653,33 +1653,20 @@ function deletePageFromGraph(id) {
   deleteRelatedPage(id);
 }
 
-/**
- * Converts graph-card plain text edits into sanitized editor HTML.
- * Blank-line breaks become paragraphs; single line breaks stay inside the paragraph as <br>.
- */
-function graphBodyHtmlFromText(bodyText) {
-  const normalized = normalizeNewlines(bodyText).trim();
-  if (!normalized) return '';
-  return normalized
-    .split(/\n{2,}/)
-    .map(paragraph => `<p>${escapeHtml(paragraph.trim()).replace(/\n/g, '<br>')}</p>`)
-    .join('');
-}
-
-/**
- * Stores graph-card plain text edits in the same Quill Delta shape used by the editor.
- */
-function graphDeltaFromText(bodyText) {
-  return JSON.stringify({ ops: [{ insert: bodyText ? `${bodyText}\n` : '\n' }] });
-}
-
-function updatePageFromGraph({ id, title, bodyText }) {
+function updatePageFromGraph({ id, title, bodyDelta, bodyHtml }) {
   const node = findNode(id);
   if (!node) return;
-  const normalizedBody = normalizeNewlines(bodyText ?? '').trim();
+  let pageDelta = null;
+  if (bodyDelta) {
+    try {
+      pageDelta = sanitizeRichDelta(JSON.parse(bodyDelta));
+    } catch (error) {
+      console.warn('Unable to parse graph editor Delta; keeping the previous editor Delta.', error);
+    }
+  }
   node.title = (title ?? '').trim();
-  node.bodyHtml = sanitizeRichHtml(graphBodyHtmlFromText(normalizedBody));
-  node.bodyDelta = graphDeltaFromText(normalizedBody);
+  node.bodyHtml = sanitizeRichHtml(normalizeEditorHtml(bodyHtml || ''));
+  if (pageDelta) node.bodyDelta = JSON.stringify(pageDelta);
   node.updatedAt = Date.now();
   persist();
 }

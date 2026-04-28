@@ -22,17 +22,6 @@
         aria-hidden="true"
       >
         <defs>
-          <marker
-            id="memo-map-arrowhead"
-            markerWidth="10"
-            markerHeight="10"
-            refX="9"
-            refY="5"
-            orient="auto"
-            markerUnits="userSpaceOnUse"
-          >
-            <path d="M 0 0 L 10 5 L 0 10 z" fill="var(--accent)" />
-          </marker>
           <mask
             id="memo-map-route-card-mask"
             maskUnits="userSpaceOnUse"
@@ -75,9 +64,18 @@
           :d="route.path"
           :style="{ strokeWidth: route.strokeWidth }"
           mask="url(#memo-map-route-card-mask)"
-          marker-end="url(#memo-map-arrowhead)"
           @mouseenter="activateRoute(route)"
           @mouseleave="clearHighlight"
+        />
+        <polygon
+          v-for="arrowhead in routeArrowheads"
+          :key="`${arrowhead.id}-arrowhead`"
+          class="memo-map-route-arrowhead"
+          :class="{
+            'memo-map-route-arrowhead--focused': arrowhead.route.touchesFocus,
+            'memo-map-route-arrowhead--active': isRouteActive(arrowhead.route),
+          }"
+          :points="arrowhead.points"
         />
       </svg>
 
@@ -93,6 +91,7 @@
           'memo-map-tile--focus': tile.isFocus,
           'memo-map-tile--remote': tile.hop > 1,
           'memo-map-tile--connected-active': isTileActive(tile.id),
+          'memo-map-tile--popover-target': isPopoverTarget(tile.id),
         }"
         :style="tile.style"
         @click="handleTileClick(tile)"
@@ -119,12 +118,20 @@
             placeholder="Page title…"
             @keydown.stop
           />
-          <textarea
-            v-model="tileDraft.bodyText"
-            class="memo-map-tile-body-input"
-            placeholder="Page details…"
-            @keydown.stop
-          ></textarea>
+          <div class="memo-map-tile-rich-editor" @keydown.stop>
+            <div :ref="setTileEditorHost"></div>
+            <div
+              v-if="tileImageResizeBar.visible"
+              class="img-resize-bar memo-map-tile-image-resize-bar"
+              :style="{ top: `${tileImageResizeBar.top}px`, left: `${tileImageResizeBar.left}px` }"
+              @mousedown.prevent
+            >
+              <button type="button" @click="resizeSelectedTileImage(25)">25%</button>
+              <button type="button" @click="resizeSelectedTileImage(50)">50%</button>
+              <button type="button" @click="resizeSelectedTileImage(75)">75%</button>
+              <button type="button" @click="resizeSelectedTileImage(100)">Full</button>
+            </div>
+          </div>
           <span class="memo-map-tile-editor-actions">
             <button type="submit" class="memo-map-action">Save</button>
             <button type="button" class="memo-map-action" @click="cancelTileEdit">Cancel</button>
@@ -166,7 +173,27 @@
           {{ label.label }}
         </button>
         <div class="memo-map-route-popover">
-          <div class="memo-map-route-popover-title">{{ label.label }}</div>
+          <div class="memo-map-route-popover-title">
+            <button
+              type="button"
+              class="memo-map-route-popover-link"
+              @click.stop="navigateToRouteNode(label.route.fromId)"
+              @mouseenter.stop="activatePopoverNode(label.route.fromId, label.route)"
+              @mouseleave.stop="clearPopoverNode(label.route)"
+            >
+              {{ label.fromTitle }}
+            </button>
+            <span>{{ label.label }}</span>
+            <button
+              type="button"
+              class="memo-map-route-popover-link"
+              @click.stop="navigateToRouteNode(label.route.toId)"
+              @mouseenter.stop="activatePopoverNode(label.route.toId, label.route)"
+              @mouseleave.stop="clearPopoverNode(label.route)"
+            >
+              {{ label.toTitle }}
+            </button>
+          </div>
           <div class="memo-map-route-popover-body" v-html="label.bodyHtml"></div>
           <div class="memo-map-route-popover-actions">
             <button class="btn btn-ghost" @click.stop="$emit('edit-relation', label.edge)">Edit relation</button>
@@ -180,9 +207,11 @@
 
 <script setup>
 import { hierarchy, treemap, treemapSquarify } from 'd3-hierarchy';
-import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue';
+import Quill from 'quill';
+import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue';
 import { DEFAULT_EDGE_WEIGHT, pScore, timeAgo } from '../utils/scoring.js';
-import { normalizeEditorHtml, sanitizeRichHtml } from '../utils/sanitize.js';
+import { imageUploadHandler } from '../utils/imageCompression.js';
+import { normalizeEditorHtml, RICH_CONTENT_TOOLBAR, sanitizeRichDelta, sanitizeRichHtml } from '../utils/sanitize.js';
 import { richTextFirstLine, truncateText } from '../utils/text.js';
 
 const props = defineProps({
@@ -197,15 +226,20 @@ const stageEl = ref(null);
 const stageSize = reactive({ width: 0, height: 0 });
 const activeNodeId = ref('');
 const activeEdgeId = ref('');
+const popoverNodeId = ref('');
 const editingTileId = ref('');
-const tileDraft = reactive({ title: '', bodyText: '' });
+const tileDraft = reactive({ title: '', bodyDelta: '', bodyHtml: '', fallbackText: '' });
+const tileImageResizeBar = reactive({ visible: false, top: 0, left: 0, imageEl: null });
 let resizeObserver = null;
+let tileEditor = null;
+let tileEditorHost = null;
+let tileImageClickHandler = null;
 
-/**
- * Corridor sizing starts with a small base whitespace and grows linearly per shared route.
- */
-const BASE_CORRIDOR_GAP = 12;
-const CORRIDOR_WIDTH_PER_ROUTE = 7;
+// Compact, visible spacing between routes.
+const BASE_CORRIDOR_GAP = 10;
+const LANE_STEP = 10;
+const LANE_MARGIN = 4;
+const MAX_INTERNAL_TILE_GAP = 18;
 const OUTER_PADDING = 18;
 const PERIMETER_ROUTE_LANE = 12;
 const MIN_SIDE_WIDTH = 150;
@@ -215,6 +249,7 @@ const FOCUS_MIN_SCORE = 36;
 const HOP_DECAY = 0.58;
 const CONTENT_SCORE_CAP = 12;
 const HTML_RICHNESS_SCORE_CAP = 10;
+const UNTITLED_PAGE_LABEL = '(untitled)';
 const ENDPOINT_STEP = 12;
 const FOCUS_SCORE_BOOST_RATIO = 1.08;
 // When the map has only a few blocks, lower the focus floor to 72% so two adjacent blocks can grow toward one third of the screen.
@@ -228,16 +263,24 @@ const FOCUS_MAX_FONT_SIZE = 18;
 const TILE_MAX_FONT_SIZE = 16;
 const MIN_VERTICAL_LABEL_LENGTH = 60;
 const ROUTE_EDGE_PADDING = 18;
-const ROUTE_CARD_CLEARANCE = 6;
-const ROUTE_MASK_CARD_BLEED = 3;
+const ROUTE_CARD_CLEARANCE = 14;
+const ROUTE_MASK_CARD_BLEED = 0;
 const ROUTE_MASK_CARD_BORDER_RADIUS = 13;
 const ROUTE_CORNER_RADIUS = 9;
 const SAME_GROUP_ROUTE_PADDING = 24;
-/** Scales down lane offsets for same-group routes because tile-to-tile gaps are already narrow. */
-const SAME_GROUP_LANE_FACTOR = 0.45;
-const LANE_STEP = 10;
+const SAME_GROUP_LANE_STEP = 16;
 const LABEL_DEFAULT_OFFSET = 12;
+const LABEL_STACK_STEP = 18;
+const LABEL_COLLISION_GAP = 8;
+const LABEL_MIN_WIDTH = 46;
+const LABEL_MAX_WIDTH = 170;
+const LABEL_HEIGHT = 24;
+const LABEL_CHARACTER_WIDTH_ESTIMATE = 6.5;
+const LABEL_HORIZONTAL_PADDING_ESTIMATE = 22;
+const LABEL_PLACEMENT_MAX_ATTEMPTS = 8;
 const ROUTE_HIT_PADDING = 10;
+const ARROWHEAD_LENGTH = 12;
+const ARROWHEAD_WIDTH = 10;
 const ROUTE_OBSTACLE_EPSILON = 0.01;
 const ROUTE_TURN_PENALTY = 14;
 const ROUTE_COORDINATE_PRECISION = 100;
@@ -478,7 +521,13 @@ function treemapGroup(models, bounds) {
 }
 
 function corridorWidth(routeCount) {
-  return BASE_CORRIDOR_GAP + routeCount * CORRIDOR_WIDTH_PER_ROUTE;
+  if (routeCount <= 0) return BASE_CORRIDOR_GAP;
+  return LANE_MARGIN * 2 + routeCount * LANE_STEP;
+}
+
+function internalTileGap(routeCount) {
+  if (routeCount <= 0) return BASE_CORRIDOR_GAP;
+  return Math.min(MAX_INTERNAL_TILE_GAP, BASE_CORRIDOR_GAP + routeCount * 2);
 }
 
 function createCorridorLoadsArray(groupCount) {
@@ -604,7 +653,7 @@ const layoutState = computed(() => {
         y: OUTER_PADDING,
         width: groupWidth,
         height,
-        padding: corridorWidth(internalLoads.get(group.key) || 0),
+        padding: internalTileGap(internalLoads.get(group.key) || 0),
         groupKey: group.key,
         groupIndex: group.index,
       }));
@@ -652,6 +701,7 @@ const visibleTiles = computed(() =>
       scoreLabel: model.score.toFixed(1),
       bodyHtml,
       bodyText: contentStats?.plainText || '',
+      bodyDelta: model.node.bodyDelta || '',
       meta: `Edited ${timeAgo(model.node.updatedAt)} · ${model.node.visits || 0} visit${model.node.visits === 1 ? '' : 's'}`,
       rect: model,
       style: {
@@ -712,6 +762,19 @@ function pointOutsideRect(rect, side, offset) {
   };
 }
 
+function pointOnRectSide(rect, side, offset) {
+  if (side === 'left' || side === 'right') {
+    return {
+      x: side === 'left' ? rect.x : rect.x + rect.width,
+      y: clamp(rectCenter(rect).y + offset, rect.y + ROUTE_EDGE_PADDING, rect.y + rect.height - ROUTE_EDGE_PADDING),
+    };
+  }
+  return {
+    x: clamp(rectCenter(rect).x + offset, rect.x + ROUTE_EDGE_PADDING, rect.x + rect.width - ROUTE_EDGE_PADDING),
+    y: side === 'top' ? rect.y : rect.y + rect.height,
+  };
+}
+
 function adjacentCorridorBetween(from, to) {
   const lowerGroupIndex = Math.min(from.groupIndex, to.groupIndex);
   return routeCorridors.value[lowerGroupIndex] || null;
@@ -722,8 +785,8 @@ function laneXInCorridor(corridor, laneOffset) {
   const center = corridor.x + corridor.width / 2;
   return clamp(
     center + laneOffset,
-    corridor.x + ROUTE_EDGE_PADDING / 2,
-    corridor.x + corridor.width - ROUTE_EDGE_PADDING / 2
+    corridor.x + LANE_MARGIN,
+    corridor.x + corridor.width - LANE_MARGIN
   );
 }
 
@@ -743,10 +806,27 @@ function distributeOffset(index, count, step = ENDPOINT_STEP) {
   return (index - (count - 1) / 2) * step;
 }
 
+function laneGroupKey(plan) {
+  if (plan.groupDistance !== 0) return '';
+  if (plan.axis === 'y') return `y:${plan.from.groupIndex}`;
+  if (plan.axis === 'x') return `x:${plan.from.groupIndex}`;
+  if (plan.axis === 'overflow') {
+    return `overflow:${plan.from.groupIndex}:${plan.startSide}`;
+  }
+  return '';
+}
+
+function laneSortValue(plan) {
+  const from = rectCenter(plan.from);
+  const to = rectCenter(plan.to);
+  return plan.axis === 'x' ? (from.x + to.x) / 2 : (from.y + to.y) / 2;
+}
+
 /**
  * Builds an SVG path from axis-aligned points and rounds each turn with a quadratic curve.
  */
 function roundedOrthogonalPath(points) {
+  points = compactOrthogonalPoints(points);
   if (points.length < 2) return '';
   const commands = [`M ${points[0].x} ${points[0].y}`];
   for (let i = 1; i < points.length - 1; i++) {
@@ -1009,6 +1089,17 @@ function labelRotation(vertical, startY, endY) {
   return endY < startY ? -90 : 90;
 }
 
+/**
+ * Returns the unit vector along a route segment (the direction the segment travels).
+ * Collision nudges move the label in this direction so it stays on its line.
+ */
+function routeSegmentAlong(segment) {
+  if (segment.vertical) {
+    return { x: 0, y: segment.end.y >= segment.start.y ? 1 : -1 };
+  }
+  return { x: segment.end.x >= segment.start.x ? 1 : -1, y: 0 };
+}
+
 const routedEdges = computed(() => {
   const plans = visibleEdges.value.map(edge => {
     const from = tileRects.value.get(edge.fromId);
@@ -1059,10 +1150,33 @@ const routedEdges = computed(() => {
       });
   }
 
+  const sameGroupLaneOffsets = new Map();
+  const sameGroupLaneGroups = new Map();
+  for (const plan of plans) {
+    const key = laneGroupKey(plan);
+    if (!key) continue;
+    if (!sameGroupLaneGroups.has(key)) sameGroupLaneGroups.set(key, []);
+    sameGroupLaneGroups.get(key).push({
+      id: plan.edge.id,
+      sortKey: laneSortValue(plan),
+    });
+  }
+  for (const routes of sameGroupLaneGroups.values()) {
+    routes
+      .sort((a, b) => a.sortKey - b.sortKey || a.id.localeCompare(b.id))
+      .forEach((route, index) => {
+        sameGroupLaneOffsets.set(route.id, distributeOffset(index, routes.length, SAME_GROUP_LANE_STEP));
+      });
+  }
+
   return plans.map(plan => {
     const { edge, from, to, groupDistance } = plan;
-    const start = pointOutsideRect(from, plan.startSide, endpointOffsets.get(`${edge.id}:start`) || 0);
-    const end = pointOutsideRect(to, plan.endSide, endpointOffsets.get(`${edge.id}:end`) || 0);
+    const startOffset = endpointOffsets.get(`${edge.id}:start`) || 0;
+    const endOffset = endpointOffsets.get(`${edge.id}:end`) || 0;
+    const startPort = pointOnRectSide(from, plan.startSide, startOffset);
+    const endPort = pointOnRectSide(to, plan.endSide, endOffset);
+    const start = pointOutsideRect(from, plan.startSide, startOffset);
+    const end = pointOutsideRect(to, plan.endSide, endOffset);
     let points = [];
     if (groupDistance === 1) {
       const corridor = adjacentCorridorBetween(from, to);
@@ -1091,13 +1205,13 @@ const routedEdges = computed(() => {
     } else if (plan.axis === 'y') {
       const top = plan.startSide === 'bottom' ? from.y + from.height : to.y + to.height;
       const bottom = plan.startSide === 'bottom' ? to.y : from.y;
-      const laneOffset = (endpointOffsets.get(`${edge.id}:start`) || 0) * SAME_GROUP_LANE_FACTOR;
+      const laneOffset = sameGroupLaneOffsets.get(edge.id) || 0;
       const midY = (top + bottom) / 2 + laneOffset;
       points = [start, { x: start.x, y: midY }, { x: end.x, y: midY }, end];
     } else if (plan.axis === 'x') {
       const left = plan.startSide === 'right' ? from.x + from.width : to.x + to.width;
       const right = plan.startSide === 'right' ? to.x : from.x;
-      const laneOffset = (endpointOffsets.get(`${edge.id}:start`) || 0) * SAME_GROUP_LANE_FACTOR;
+      const laneOffset = sameGroupLaneOffsets.get(edge.id) || 0;
       const midX = (left + right) / 2 + laneOffset;
       points = createVerticalBendPoints(start, end, midX);
     } else {
@@ -1105,23 +1219,29 @@ const routedEdges = computed(() => {
       const rawMidX = routeOnRight
         ? Math.max(from.x + from.width, to.x + to.width) + SAME_GROUP_ROUTE_PADDING
         : Math.min(from.x, to.x) - SAME_GROUP_ROUTE_PADDING;
-      const laneOffset = endpointOffsets.get(`${edge.id}:start`) || 0;
+      const laneOffset = sameGroupLaneOffsets.get(edge.id) || 0;
       const midX = clamp(rawMidX + (routeOnRight ? laneOffset : -laneOffset), ROUTE_EDGE_PADDING, stageSize.width - ROUTE_EDGE_PADDING);
       points = createVerticalBendPoints(start, end, midX);
     }
 
     const strokeWidth = 1.1 + Math.min(1.8, (edge.weight || DEFAULT_EDGE_WEIGHT) / 8);
     points = findClearOrthogonalRoute(points);
+    points = [
+      routePoint(startPort),
+      ...points,
+      routePoint(endPort),
+    ];
     return {
       id: edge.id,
       edge,
       fromId: edge.fromId,
       toId: edge.toId,
+      endSide: plan.endSide,
       points,
-      startX: start.x,
-      startY: start.y,
-      endX: end.x,
-      endY: end.y,
+      startX: startPort.x,
+      startY: startPort.y,
+      endX: endPort.x,
+      endY: endPort.y,
       path: roundedOrthogonalPath(points),
       label: relationLabel(edge),
       bodyHtml: relationBodyHtml(edge),
@@ -1133,7 +1253,10 @@ const routedEdges = computed(() => {
 });
 
 /**
- * Chooses the clearest label position, preferring long horizontal route segments before vertical fallbacks.
+ * Picks the best label position on the route: the midpoint of the longest
+ * horizontal segment (if long enough), otherwise the longest segment overall.
+ * Returns the position, orientation flags, along-direction for nudging, and
+ * the segment's own bounds so collision nudges stay on the line.
  */
 function routeLabelPlacement(route) {
   const segments = [];
@@ -1160,6 +1283,8 @@ function routeLabelPlacement(route) {
       y: (route.startY + route.endY) / 2 - LABEL_DEFAULT_OFFSET,
       vertical: false,
       rotation: 0,
+      along: { x: 1, y: 0 },
+      segmentBounds: null,
     };
   }
   const vertical = !horizontal && segment.vertical && segment.length >= MIN_VERTICAL_LABEL_LENGTH;
@@ -1168,24 +1293,128 @@ function routeLabelPlacement(route) {
     y: (segment.start.y + segment.end.y) / 2,
     vertical,
     rotation: labelRotation(vertical, segment.start.y, segment.end.y),
+    along: routeSegmentAlong(segment),
+    segmentBounds: {
+      minX: Math.min(segment.start.x, segment.end.x),
+      maxX: Math.max(segment.start.x, segment.end.x),
+      minY: Math.min(segment.start.y, segment.end.y),
+      maxY: Math.max(segment.start.y, segment.end.y),
+    },
   };
 }
 
-const routeLabels = computed(() =>
-  routedEdges.value.map(route => {
+/**
+ * Estimates the screen-space bounds of a route label, accounting for vertical labels.
+ */
+function labelBounds(label) {
+  const width = Math.min(
+    LABEL_MAX_WIDTH,
+    Math.max(LABEL_MIN_WIDTH, label.label.length * LABEL_CHARACTER_WIDTH_ESTIMATE + LABEL_HORIZONTAL_PADDING_ESTIMATE)
+  );
+  const halfWidth = label.vertical ? LABEL_HEIGHT / 2 : width / 2;
+  const halfHeight = label.vertical ? width / 2 : LABEL_HEIGHT / 2;
+  return {
+    left: label.x - halfWidth,
+    right: label.x + halfWidth,
+    top: label.y - halfHeight,
+    bottom: label.y + halfHeight,
+  };
+}
+
+/**
+ * Detects whether two label bounds overlap after applying the collision gap.
+ */
+function boundsOverlap(a, b) {
+  return a.left < b.right + LABEL_COLLISION_GAP
+    && a.right + LABEL_COLLISION_GAP > b.left
+    && a.top < b.bottom + LABEL_COLLISION_GAP
+    && a.bottom + LABEL_COLLISION_GAP > b.top;
+}
+
+const routeLabels = computed(() => {
+  const placed = [];
+  return routedEdges.value.map(route => {
     const placement = routeLabelPlacement(route);
-    return {
+    const label = {
       id: route.id,
       label: route.label,
       bodyHtml: route.bodyHtml,
       route,
       edge: route.edge,
+      fromTitle: nodesById.value.get(route.fromId)?.title || UNTITLED_PAGE_LABEL,
+      toTitle: nodesById.value.get(route.toId)?.title || UNTITLED_PAGE_LABEL,
       vertical: placement.vertical,
+      rotation: placement.rotation,
+      x: placement.x,
+      y: placement.y,
+    };
+
+    // Slide the label along its segment to avoid overlapping other labels.
+    // Sliding along the segment (not perpendicular) keeps the label on its line.
+    let attempt = 0;
+    let currentBounds = labelBounds(label);
+    while (placed.some(existing => boundsOverlap(currentBounds, labelBounds(existing))) && attempt < LABEL_PLACEMENT_MAX_ATTEMPTS) {
+      const direction = attempt % 2 === 0 ? 1 : -1;
+      const distance = Math.ceil((attempt + 1) / 2) * LABEL_STACK_STEP;
+      label.x = placement.x + placement.along.x * direction * distance;
+      label.y = placement.y + placement.along.y * direction * distance;
+      // Clamp within the segment so the label never leaves its line.
+      if (placement.segmentBounds) {
+        label.x = clamp(label.x, placement.segmentBounds.minX, placement.segmentBounds.maxX);
+        label.y = clamp(label.y, placement.segmentBounds.minY, placement.segmentBounds.maxY);
+      }
+      currentBounds = labelBounds(label);
+      attempt++;
+    }
+
+    placed.push(label);
+    return {
+      ...label,
       style: {
-        left: `${placement.x}px`,
-        top: `${placement.y}px`,
-        '--memo-label-rotation': `${placement.rotation}deg`,
+        left: `${label.x}px`,
+        top: `${label.y}px`,
+        '--memo-label-rotation': `${label.rotation}deg`,
       },
+    };
+  });
+});
+
+/**
+ * Builds SVG polygon points for an arrowhead tip at point, facing along unit.
+ */
+function arrowheadPolygon(point, unit) {
+  const base = {
+    x: point.x - unit.x * ARROWHEAD_LENGTH,
+    y: point.y - unit.y * ARROWHEAD_LENGTH,
+  };
+  const perpendicular = { x: -unit.y, y: unit.x };
+  const left = {
+    x: base.x + perpendicular.x * ARROWHEAD_WIDTH / 2,
+    y: base.y + perpendicular.y * ARROWHEAD_WIDTH / 2,
+  };
+  const right = {
+    x: base.x - perpendicular.x * ARROWHEAD_WIDTH / 2,
+    y: base.y - perpendicular.y * ARROWHEAD_WIDTH / 2,
+  };
+  return `${point.x},${point.y} ${left.x},${left.y} ${right.x},${right.y}`;
+}
+
+function arrowUnitForEndSide(side) {
+  return {
+    left: { x: 1, y: 0 },
+    right: { x: -1, y: 0 },
+    top: { x: 0, y: 1 },
+    bottom: { x: 0, y: -1 },
+  }[side] || { x: 1, y: 0 };
+}
+
+const routeArrowheads = computed(() =>
+  routedEdges.value.map(route => {
+    const tip = route.points[route.points.length - 1];
+    return {
+      id: route.id,
+      route,
+      points: arrowheadPolygon(tip, arrowUnitForEndSide(route.endSide)),
     };
   })
 );
@@ -1194,29 +1423,149 @@ function handleTileClick(tile) {
   if (tile.id !== props.currentId) emit('navigate', tile.id);
 }
 
+function navigateToRouteNode(nodeId) {
+  if (nodeId && nodeId !== props.currentId) emit('navigate', nodeId);
+}
+
 function handleTileKeydown(event, tile) {
   if (event.target !== event.currentTarget) return;
   handleTileClick(tile);
 }
 
-function startTileEdit(tile) {
+function setTileEditorHost(el) {
+  tileEditorHost = el;
+}
+
+function hideTileImageResizeBar() {
+  tileImageResizeBar.visible = false;
+  tileImageResizeBar.imageEl = null;
+}
+
+function showTileImageResizeBar(imgEl) {
+  const editorRect = tileEditor.root.getBoundingClientRect();
+  const imgRect = imgEl.getBoundingClientRect();
+  tileImageResizeBar.imageEl = imgEl;
+  tileImageResizeBar.top = imgRect.bottom - editorRect.top + tileEditor.root.scrollTop + 4;
+  tileImageResizeBar.left = imgRect.left - editorRect.left;
+  tileImageResizeBar.visible = true;
+}
+
+function attachTileImageClickHandlers() {
+  if (!tileEditor) return;
+  if (tileImageClickHandler) {
+    tileEditor.root.removeEventListener('click', tileImageClickHandler);
+  }
+  tileImageClickHandler = (event) => {
+    if (event.target.tagName === 'IMG') {
+      showTileImageResizeBar(event.target);
+    } else {
+      hideTileImageResizeBar();
+    }
+  };
+  tileEditor.root.addEventListener('click', tileImageClickHandler);
+}
+
+function removeTileImageClickHandlers() {
+  if (tileEditor && tileImageClickHandler) {
+    tileEditor.root.removeEventListener('click', tileImageClickHandler);
+  }
+  tileImageClickHandler = null;
+}
+
+function resizeSelectedTileImage(widthPct) {
+  if (!tileImageResizeBar.imageEl || !tileEditor) return;
+  const blot = Quill.find(tileImageResizeBar.imageEl);
+  if (blot) {
+    tileEditor.formatText(tileEditor.getIndex(blot), 1, 'width', widthPct === 100 ? false : `${widthPct}%`, 'user');
+  }
+  hideTileImageResizeBar();
+}
+
+/**
+ * Restores Quill contents from a serialized Delta and reports whether it succeeded.
+ * @param {Quill} quill
+ * @param {string} serializedDelta
+ * @returns {boolean}
+ */
+function restoreEditorContents(quill, serializedDelta) {
+  try {
+    const parsed = JSON.parse(serializedDelta);
+    quill.setContents(sanitizeRichDelta(parsed));
+    return true;
+  } catch (error) {
+    console.warn('Unable to restore graph tile editor contents from Delta; will attempt to load from HTML or plain text fallback.', error);
+    return false;
+  }
+}
+
+function initTileEditor() {
+  if (!tileEditorHost || !editingTileId.value) return;
+  tileEditorHost.replaceChildren();
+  const editorEl = document.createElement('div');
+  tileEditorHost.appendChild(editorEl);
+  try {
+    tileEditor = new Quill(editorEl, {
+      theme: 'snow',
+      placeholder: 'Write something about this page…',
+      modules: {
+        toolbar: RICH_CONTENT_TOOLBAR,
+        uploader: {
+          handler: imageUploadHandler,
+        },
+      },
+    });
+  } catch (error) {
+    tileEditor = null;
+    tileEditorHost.textContent = 'Unable to initialize the rich editor. Cancel and try again.';
+    console.warn('Unable to initialize graph tile rich editor.', error);
+    return;
+  }
+  const deltaRestored = tileDraft.bodyDelta && restoreEditorContents(tileEditor, tileDraft.bodyDelta);
+  if (!deltaRestored && tileDraft.bodyHtml) {
+    tileEditor.clipboard.dangerouslyPasteHTML(sanitizeRichHtml(normalizeEditorHtml(tileDraft.bodyHtml)));
+  } else if (!deltaRestored && tileDraft.fallbackText) {
+    tileEditor.setText(tileDraft.fallbackText);
+  }
+  attachTileImageClickHandlers();
+}
+
+async function startTileEdit(tile) {
+  if (editingTileId.value && editingTileId.value !== tile.id) {
+    cancelTileEdit();
+  } else {
+    removeTileImageClickHandlers();
+    hideTileImageResizeBar();
+    tileEditor = null;
+  }
   editingTileId.value = tile.id;
   tileDraft.title = tile.title;
-  tileDraft.bodyText = tile.bodyText || '';
+  tileDraft.bodyDelta = tile.bodyDelta || '';
+  tileDraft.bodyHtml = tile.bodyHtml || '';
+  tileDraft.fallbackText = tile.bodyText || '';
+  await nextTick();
+  initTileEditor();
 }
 
 function cancelTileEdit() {
+  removeTileImageClickHandlers();
+  hideTileImageResizeBar();
+  tileEditor = null;
   editingTileId.value = '';
   tileDraft.title = '';
-  tileDraft.bodyText = '';
+  tileDraft.bodyDelta = '';
+  tileDraft.bodyHtml = '';
+  tileDraft.fallbackText = '';
 }
 
 function saveTileEdit() {
   if (!editingTileId.value) return;
+  const bodyDelta = tileEditor ? JSON.stringify(sanitizeRichDelta(tileEditor.getContents())) : tileDraft.bodyDelta;
+  const bodyHtml = tileEditor ? sanitizeRichHtml(normalizeEditorHtml(tileEditor.root.innerHTML)) : tileDraft.bodyHtml;
   emit('update-page', {
     id: editingTileId.value,
     title: tileDraft.title,
-    bodyText: tileDraft.bodyText,
+    bodyDelta,
+    bodyHtml,
   });
   cancelTileEdit();
 }
@@ -1231,9 +1580,20 @@ function activateRoute(route) {
   activeNodeId.value = '';
 }
 
+function activatePopoverNode(nodeId, route) {
+  popoverNodeId.value = nodeId;
+  activateRoute(route);
+}
+
+function clearPopoverNode(route) {
+  popoverNodeId.value = '';
+  activateRoute(route);
+}
+
 function clearHighlight() {
   activeNodeId.value = '';
   activeEdgeId.value = '';
+  popoverNodeId.value = '';
 }
 
 function clearHighlightIfFocusLeaves(event) {
@@ -1258,6 +1618,10 @@ function isTileActive(tileId) {
   }
   if (!activeNodeId.value) return false;
   return routedEdges.value.some(route => routeTouchesActiveNode(route) && (route.fromId === tileId || route.toId === tileId));
+}
+
+function isPopoverTarget(tileId) {
+  return !!tileId && popoverNodeId.value === tileId;
 }
 
 function updateStageSize() {
