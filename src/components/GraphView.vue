@@ -187,7 +187,7 @@
             <button
               type="button"
               class="memo-map-route-popover-link"
-              @click.stop="focusRouteNode(label.route.fromId)"
+              @click.stop="navigateToRouteNode(label.route.fromId)"
               @mouseenter.stop="activateNode(label.route.fromId)"
               @mouseleave.stop="activateRoute(label.route)"
             >
@@ -197,7 +197,7 @@
             <button
               type="button"
               class="memo-map-route-popover-link"
-              @click.stop="focusRouteNode(label.route.toId)"
+              @click.stop="navigateToRouteNode(label.route.toId)"
               @mouseenter.stop="activateNode(label.route.toId)"
               @mouseleave.stop="activateRoute(label.route)"
             >
@@ -1383,7 +1383,7 @@ function handleTileClick(tile) {
   if (tile.id !== props.currentId) emit('navigate', tile.id);
 }
 
-function focusRouteNode(nodeId) {
+function navigateToRouteNode(nodeId) {
   if (nodeId && nodeId !== props.currentId) emit('navigate', nodeId);
 }
 
