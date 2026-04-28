@@ -829,7 +829,7 @@ function treemapEdgeRoutingScore(edge) {
 }
 
 function insertTreemapEdgeCandidate(candidates, candidate) {
-  const insertIndex = candidates.findIndex(item => candidate.score < item.score);
+  const insertIndex = candidates.findIndex(item => candidate.score > item.score);
   if (insertIndex === -1) candidates.push(candidate);
   else candidates.splice(insertIndex, 0, candidate);
 }
@@ -840,14 +840,12 @@ function topTreemapEdgesToRoute(edges) {
     const candidate = { edge, score: treemapEdgeRoutingScore(edge) };
     if (candidates.length < TREEMAP_MAX_EDGES_TO_ROUTE) {
       insertTreemapEdgeCandidate(candidates, candidate);
-    } else if (candidate.score > candidates[0].score) {
-      candidates.shift();
+    } else if (candidate.score >= candidates[candidates.length - 1].score) {
+      candidates.pop();
       insertTreemapEdgeCandidate(candidates, candidate);
     }
   }
-  return candidates
-    .sort((a, b) => b.score - a.score)
-    .map(({ edge }) => edge);
+  return candidates.map(({ edge }) => edge);
 }
 
 const visibleEdges = computed(() => {
