@@ -258,6 +258,7 @@ const FOCUS_MIN_SCORE = 36;
 const HOP_DECAY = 0.58;
 const CONTENT_SCORE_CAP = 12;
 const HTML_RICHNESS_SCORE_CAP = 10;
+const UNTITLED_PAGE_LABEL = '(untitled)';
 const ENDPOINT_STEP = 12;
 const FOCUS_SCORE_BOOST_RATIO = 1.08;
 // When the map has only a few blocks, lower the focus floor to 72% so two adjacent blocks can grow toward one third of the screen.
@@ -821,10 +822,6 @@ function roundedOrthogonalPath(points) {
     const prev = points[i - 1];
     const current = points[i];
     const next = points[i + 1];
-    if ((prev.x === current.x && current.x === next.x)
-      || (prev.y === current.y && current.y === next.y)) {
-      continue;
-    }
     const incomingDistance = Math.abs(current.x - prev.x) + Math.abs(current.y - prev.y);
     const outgoingDistance = Math.abs(next.x - current.x) + Math.abs(next.y - current.y);
     const radius = Math.min(ROUTE_CORNER_RADIUS, incomingDistance / 2, outgoingDistance / 2);
@@ -1309,8 +1306,8 @@ const routeLabels = computed(() => {
       bodyHtml: route.bodyHtml,
       route,
       edge: route.edge,
-      fromTitle: nodesById.value.get(route.fromId)?.title || '(untitled)',
-      toTitle: nodesById.value.get(route.toId)?.title || '(untitled)',
+      fromTitle: nodesById.value.get(route.fromId)?.title || UNTITLED_PAGE_LABEL,
+      toTitle: nodesById.value.get(route.toId)?.title || UNTITLED_PAGE_LABEL,
       vertical: placement.vertical,
       rotation: placement.rotation,
       x: placement.x,
