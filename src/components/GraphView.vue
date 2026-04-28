@@ -1102,8 +1102,10 @@ function labelRotation(vertical, startY, endY) {
  * Collision nudges move the label in this direction so it stays on its line.
  */
 function routeSegmentAlong(segment) {
-  if (segment.vertical) return { x: 0, y: 1 };
-  return { x: 1, y: 0 };
+  if (segment.vertical) {
+    return { x: 0, y: segment.end.y >= segment.start.y ? 1 : -1 };
+  }
+  return { x: segment.end.x >= segment.start.x ? 1 : -1, y: 0 };
 }
 
 const routedEdges = computed(() => {
