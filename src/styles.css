@@ -826,6 +826,24 @@ body {
   filter: drop-shadow(0 0 9px rgba(165,180,252,.58));
 }
 
+.memo-map-route-arrowhead {
+  fill: var(--accent);
+  opacity: .82;
+  filter: drop-shadow(0 0 4px rgba(129,140,248,.22));
+  pointer-events: none;
+  transition: fill .16s ease, opacity .16s ease;
+}
+
+.memo-map-route-arrowhead--focused {
+  opacity: .96;
+}
+
+.memo-map-route-arrowhead--active {
+  fill: rgba(221,225,245,.96);
+  opacity: 1;
+  filter: drop-shadow(0 0 9px rgba(165,180,252,.58));
+}
+
 .memo-map-tile {
   position: absolute;
   z-index: 2;
@@ -954,6 +972,43 @@ body {
   color: var(--muted);
   font-size: .78em;
   line-height: 1.42;
+}
+
+.memo-map-tile-rich-editor {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  border: 1px solid rgba(129,140,248,.3);
+  border-radius: 8px;
+  background: rgba(13,15,26,.58);
+}
+
+.memo-map-tile-rich-editor .ql-toolbar.ql-snow {
+  border: 0;
+  border-bottom: 1px solid rgba(129,140,248,.24);
+  padding: 4px 6px;
+}
+
+.memo-map-tile-rich-editor .ql-container.ql-snow {
+  border: 0;
+  font: inherit;
+}
+
+.memo-map-tile-rich-editor .ql-editor {
+  min-height: 96px;
+  padding: 8px;
+  font-size: .78em;
+  line-height: 1.42;
+}
+
+.memo-map-tile-rich-editor:focus-within {
+  border-color: rgba(165,180,252,.86);
+  box-shadow: 0 0 0 3px rgba(129,140,248,.12);
+}
+
+.memo-map-tile-image-resize-bar {
+  z-index: 3;
 }
 
 .memo-map-tile-title-input:focus,

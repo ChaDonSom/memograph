@@ -75,9 +75,18 @@
           :d="route.path"
           :style="{ strokeWidth: route.strokeWidth }"
           mask="url(#memo-map-route-card-mask)"
-          marker-end="url(#memo-map-arrowhead)"
           @mouseenter="activateRoute(route)"
           @mouseleave="clearHighlight"
+        />
+        <polygon
+          v-for="arrowhead in routeArrowheads"
+          :key="`${arrowhead.id}-arrowhead`"
+          class="memo-map-route-arrowhead"
+          :class="{
+            'memo-map-route-arrowhead--focused': arrowhead.route.touchesFocus,
+            'memo-map-route-arrowhead--active': isRouteActive(arrowhead.route),
+          }"
+          :points="arrowhead.points"
         />
       </svg>
 
@@ -119,12 +128,20 @@
             placeholder="Page title…"
             @keydown.stop
           />
-          <textarea
-            v-model="tileDraft.bodyText"
-            class="memo-map-tile-body-input"
-            placeholder="Page details…"
-            @keydown.stop
-          ></textarea>
+          <div class="memo-map-tile-rich-editor" @keydown.stop>
+            <div :ref="setTileEditorHost"></div>
+            <div
+              v-if="tileImageResizeBar.visible"
+              class="img-resize-bar memo-map-tile-image-resize-bar"
+              :style="{ top: `${tileImageResizeBar.top}px`, left: `${tileImageResizeBar.left}px` }"
+              @mousedown.prevent
+            >
+              <button type="button" @click="resizeSelectedTileImage(25)">25%</button>
+              <button type="button" @click="resizeSelectedTileImage(50)">50%</button>
+              <button type="button" @click="resizeSelectedTileImage(75)">75%</button>
+              <button type="button" @click="resizeSelectedTileImage(100)">Full</button>
+            </div>
+          </div>
           <span class="memo-map-tile-editor-actions">
             <button type="submit" class="memo-map-action">Save</button>
             <button type="button" class="memo-map-action" @click="cancelTileEdit">Cancel</button>
@@ -180,9 +197,11 @@
 
 <script setup>
 import { hierarchy, treemap, treemapSquarify } from 'd3-hierarchy';
-import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue';
+import Quill from 'quill';
+import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue';
 import { DEFAULT_EDGE_WEIGHT, pScore, timeAgo } from '../utils/scoring.js';
-import { normalizeEditorHtml, sanitizeRichHtml } from '../utils/sanitize.js';
+import { imageUploadHandler } from '../utils/imageCompression.js';
+import { normalizeEditorHtml, RICH_CONTENT_TOOLBAR, sanitizeRichDelta, sanitizeRichHtml } from '../utils/sanitize.js';
 import { richTextFirstLine, truncateText } from '../utils/text.js';
 
 const props = defineProps({
@@ -198,8 +217,11 @@ const stageSize = reactive({ width: 0, height: 0 });
 const activeNodeId = ref('');
 const activeEdgeId = ref('');
 const editingTileId = ref('');
-const tileDraft = reactive({ title: '', bodyText: '' });
+const tileDraft = reactive({ title: '', bodyDelta: '', bodyHtml: '', fallbackText: '' });
+const tileImageResizeBar = reactive({ visible: false, top: 0, left: 0, imageEl: null });
 let resizeObserver = null;
+let tileEditor = null;
+let tileEditorHost = null;
 
 /**
  * Corridor sizing starts with a small base whitespace and grows linearly per shared route.
@@ -228,16 +250,25 @@ const FOCUS_MAX_FONT_SIZE = 18;
 const TILE_MAX_FONT_SIZE = 16;
 const MIN_VERTICAL_LABEL_LENGTH = 60;
 const ROUTE_EDGE_PADDING = 18;
-const ROUTE_CARD_CLEARANCE = 6;
-const ROUTE_MASK_CARD_BLEED = 3;
+const ROUTE_CARD_CLEARANCE = 14;
+const ROUTE_MASK_CARD_BLEED = 1;
 const ROUTE_MASK_CARD_BORDER_RADIUS = 13;
 const ROUTE_CORNER_RADIUS = 9;
 const SAME_GROUP_ROUTE_PADDING = 24;
 /** Scales down lane offsets for same-group routes because tile-to-tile gaps are already narrow. */
-const SAME_GROUP_LANE_FACTOR = 0.45;
-const LANE_STEP = 10;
+const SAME_GROUP_LANE_FACTOR = 0.8;
+const LANE_STEP = 12;
 const LABEL_DEFAULT_OFFSET = 12;
+const LABEL_STACK_STEP = 18;
+const LABEL_COLLISION_GAP = 8;
+const LABEL_MAX_WIDTH = 170;
+const LABEL_HEIGHT = 24;
 const ROUTE_HIT_PADDING = 10;
+const ARROWHEAD_LENGTH = 12;
+const ARROWHEAD_WIDTH = 10;
+const ARROWHEAD_ENDPOINT_GAP = 2;
+const ARROWHEAD_COLLISION_STEP = 14;
+const ARROWHEAD_LABEL_RADIUS = 28;
 const ROUTE_OBSTACLE_EPSILON = 0.01;
 const ROUTE_TURN_PENALTY = 14;
 const ROUTE_COORDINATE_PRECISION = 100;
@@ -652,6 +683,7 @@ const visibleTiles = computed(() =>
       scoreLabel: model.score.toFixed(1),
       bodyHtml,
       bodyText: contentStats?.plainText || '',
+      bodyDelta: model.node.bodyDelta || '',
       meta: `Edited ${timeAgo(model.node.updatedAt)} · ${model.node.visits || 0} visit${model.node.visits === 1 ? '' : 's'}`,
       rect: model,
       style: {
@@ -1009,6 +1041,11 @@ function labelRotation(vertical, startY, endY) {
   return endY < startY ? -90 : 90;
 }
 
+function routeSegmentNormal(segment) {
+  if (segment.vertical) return { x: 1, y: 0 };
+  return { x: 0, y: -1 };
+}
+
 const routedEdges = computed(() => {
   const plans = visibleEdges.value.map(edge => {
     const from = tileRects.value.get(edge.fromId);
@@ -1160,6 +1197,7 @@ function routeLabelPlacement(route) {
       y: (route.startY + route.endY) / 2 - LABEL_DEFAULT_OFFSET,
       vertical: false,
       rotation: 0,
+      normal: { x: 0, y: -1 },
     };
   }
   const vertical = !horizontal && segment.vertical && segment.length >= MIN_VERTICAL_LABEL_LENGTH;
@@ -1168,27 +1206,151 @@ function routeLabelPlacement(route) {
     y: (segment.start.y + segment.end.y) / 2,
     vertical,
     rotation: labelRotation(vertical, segment.start.y, segment.end.y),
+    normal: routeSegmentNormal(segment),
   };
 }
 
-const routeLabels = computed(() =>
-  routedEdges.value.map(route => {
+function labelBounds(label) {
+  const width = Math.min(LABEL_MAX_WIDTH, Math.max(46, label.label.length * 6.5 + 22));
+  const halfWidth = label.vertical ? LABEL_HEIGHT / 2 : width / 2;
+  const halfHeight = label.vertical ? width / 2 : LABEL_HEIGHT / 2;
+  return {
+    left: label.x - halfWidth,
+    right: label.x + halfWidth,
+    top: label.y - halfHeight,
+    bottom: label.y + halfHeight,
+  };
+}
+
+function boundsOverlap(a, b) {
+  return a.left < b.right + LABEL_COLLISION_GAP
+    && a.right + LABEL_COLLISION_GAP > b.left
+    && a.top < b.bottom + LABEL_COLLISION_GAP
+    && a.bottom + LABEL_COLLISION_GAP > b.top;
+}
+
+function nudgeLabelIntoStage(label) {
+  label.x = clamp(label.x, ROUTE_EDGE_PADDING, stageSize.width - ROUTE_EDGE_PADDING);
+  label.y = clamp(label.y, PERIMETER_ROUTE_LANE, stageSize.height - PERIMETER_ROUTE_LANE);
+}
+
+const routeLabels = computed(() => {
+  const placed = [];
+  return routedEdges.value.map(route => {
     const placement = routeLabelPlacement(route);
-    return {
+    const label = {
       id: route.id,
       label: route.label,
       bodyHtml: route.bodyHtml,
       route,
       edge: route.edge,
       vertical: placement.vertical,
+      rotation: placement.rotation,
+      x: placement.x,
+      y: placement.y,
+      normal: placement.normal,
+    };
+
+    let attempt = 0;
+    while (placed.some(existing => boundsOverlap(labelBounds(label), labelBounds(existing))) && attempt < 8) {
+      const direction = attempt % 2 === 0 ? 1 : -1;
+      const distance = Math.ceil((attempt + 1) / 2) * LABEL_STACK_STEP;
+      label.x = placement.x + label.normal.x * direction * distance;
+      label.y = placement.y + label.normal.y * direction * distance;
+      nudgeLabelIntoStage(label);
+      attempt++;
+    }
+
+    placed.push(label);
+    return {
+      ...label,
       style: {
-        left: `${placement.x}px`,
-        top: `${placement.y}px`,
-        '--memo-label-rotation': `${placement.rotation}deg`,
+        left: `${label.x}px`,
+        top: `${label.y}px`,
+        '--memo-label-rotation': `${label.rotation}deg`,
       },
     };
-  })
-);
+  });
+});
+
+function distanceBetweenPoints(a, b) {
+  return Math.hypot(a.x - b.x, a.y - b.y);
+}
+
+function pointBackAlongRoute(points, distanceFromEnd) {
+  let remaining = distanceFromEnd;
+  for (let index = points.length - 1; index > 0; index--) {
+    const end = points[index];
+    const start = points[index - 1];
+    const length = distanceBetweenPoints(start, end);
+    if (length <= 0) continue;
+    if (remaining <= length) {
+      const ratio = remaining / length;
+      return {
+        x: end.x + (start.x - end.x) * ratio,
+        y: end.y + (start.y - end.y) * ratio,
+        unit: {
+          x: (end.x - start.x) / length,
+          y: (end.y - start.y) / length,
+        },
+      };
+    }
+    remaining -= length;
+  }
+
+  const start = points[0];
+  const end = points[points.length - 1];
+  const length = Math.max(1, distanceBetweenPoints(start, end));
+  return {
+    x: end.x,
+    y: end.y,
+    unit: {
+      x: (end.x - start.x) / length,
+      y: (end.y - start.y) / length,
+    },
+  };
+}
+
+function arrowheadPolygon(point, unit) {
+  const base = {
+    x: point.x - unit.x * ARROWHEAD_LENGTH,
+    y: point.y - unit.y * ARROWHEAD_LENGTH,
+  };
+  const perpendicular = { x: -unit.y, y: unit.x };
+  const left = {
+    x: base.x + perpendicular.x * ARROWHEAD_WIDTH / 2,
+    y: base.y + perpendicular.y * ARROWHEAD_WIDTH / 2,
+  };
+  const right = {
+    x: base.x - perpendicular.x * ARROWHEAD_WIDTH / 2,
+    y: base.y - perpendicular.y * ARROWHEAD_WIDTH / 2,
+  };
+  return `${point.x},${point.y} ${left.x},${left.y} ${right.x},${right.y}`;
+}
+
+const routeArrowheads = computed(() => {
+  const placedByEndpoint = new Map();
+  const labels = routeLabels.value.map(label => ({ x: label.x, y: label.y }));
+  return routedEdges.value.map(route => {
+    const endpointKey = `${Math.round(route.endX / 4) * 4}:${Math.round(route.endY / 4) * 4}`;
+    const endpointCount = placedByEndpoint.get(endpointKey) || 0;
+    placedByEndpoint.set(endpointKey, endpointCount + 1);
+    let distanceFromEnd = ARROWHEAD_ENDPOINT_GAP + endpointCount * ARROWHEAD_COLLISION_STEP;
+    let placement = pointBackAlongRoute(route.points, distanceFromEnd);
+    while (
+      labels.some(label => distanceBetweenPoints(label, placement) < ARROWHEAD_LABEL_RADIUS)
+      && distanceFromEnd < ARROWHEAD_ENDPOINT_GAP + ARROWHEAD_COLLISION_STEP * 6
+    ) {
+      distanceFromEnd += ARROWHEAD_COLLISION_STEP;
+      placement = pointBackAlongRoute(route.points, distanceFromEnd);
+    }
+    return {
+      id: route.id,
+      route,
+      points: arrowheadPolygon(placement, placement.unit),
+    };
+  });
+});
 
 function handleTileClick(tile) {
   if (tile.id !== props.currentId) emit('navigate', tile.id);
@@ -1199,24 +1361,109 @@ function handleTileKeydown(event, tile) {
   handleTileClick(tile);
 }
 
-function startTileEdit(tile) {
+function setTileEditorHost(el) {
+  tileEditorHost = el;
+}
+
+function hideTileImageResizeBar() {
+  tileImageResizeBar.visible = false;
+  tileImageResizeBar.imageEl = null;
+}
+
+function showTileImageResizeBar(imgEl) {
+  const editorRect = tileEditor.root.getBoundingClientRect();
+  const imgRect = imgEl.getBoundingClientRect();
+  tileImageResizeBar.imageEl = imgEl;
+  tileImageResizeBar.top = imgRect.bottom - editorRect.top + tileEditor.root.scrollTop + 4;
+  tileImageResizeBar.left = imgRect.left - editorRect.left;
+  tileImageResizeBar.visible = true;
+}
+
+function attachTileImageClickHandlers() {
+  if (!tileEditor) return;
+  tileEditor.root.addEventListener('click', (event) => {
+    if (event.target.tagName === 'IMG') {
+      showTileImageResizeBar(event.target);
+    } else {
+      hideTileImageResizeBar();
+    }
+  });
+}
+
+function resizeSelectedTileImage(widthPct) {
+  if (!tileImageResizeBar.imageEl || !tileEditor) return;
+  const blot = Quill.find(tileImageResizeBar.imageEl);
+  if (blot) {
+    tileEditor.formatText(tileEditor.getIndex(blot), 1, 'width', widthPct === 100 ? false : `${widthPct}%`, 'user');
+  }
+  hideTileImageResizeBar();
+}
+
+function restoreEditorContents(quill, serializedDelta) {
+  try {
+    const parsed = JSON.parse(serializedDelta);
+    quill.setContents(sanitizeRichDelta(parsed));
+    return true;
+  } catch (error) {
+    console.warn('Unable to restore graph tile editor contents; falling back to saved HTML/plain text.', error);
+    return false;
+  }
+}
+
+function initTileEditor() {
+  if (!tileEditorHost || !editingTileId.value) return;
+  tileEditorHost.innerHTML = '';
+  const editorEl = document.createElement('div');
+  tileEditorHost.appendChild(editorEl);
+  tileEditor = new Quill(editorEl, {
+    theme: 'snow',
+    placeholder: 'Write something about this page…',
+    modules: {
+      toolbar: RICH_CONTENT_TOOLBAR,
+      uploader: {
+        handler: imageUploadHandler,
+      },
+    },
+  });
+  if (tileDraft.bodyDelta && !restoreEditorContents(tileEditor, tileDraft.bodyDelta)) {
+    tileEditor.clipboard.dangerouslyPasteHTML(sanitizeRichHtml(normalizeEditorHtml(tileDraft.bodyHtml || '')));
+  } else if (!tileDraft.bodyDelta && tileDraft.bodyHtml) {
+    tileEditor.clipboard.dangerouslyPasteHTML(sanitizeRichHtml(normalizeEditorHtml(tileDraft.bodyHtml)));
+  } else if (tileDraft.fallbackText) {
+    tileEditor.setText(tileDraft.fallbackText);
+  }
+  attachTileImageClickHandlers();
+}
+
+async function startTileEdit(tile) {
   editingTileId.value = tile.id;
   tileDraft.title = tile.title;
-  tileDraft.bodyText = tile.bodyText || '';
+  tileDraft.bodyDelta = tile.bodyDelta || '';
+  tileDraft.bodyHtml = tile.bodyHtml || '';
+  tileDraft.fallbackText = tile.bodyText || '';
+  await nextTick();
+  initTileEditor();
 }
 
 function cancelTileEdit() {
+  hideTileImageResizeBar();
+  tileEditor = null;
   editingTileId.value = '';
   tileDraft.title = '';
-  tileDraft.bodyText = '';
+  tileDraft.bodyDelta = '';
+  tileDraft.bodyHtml = '';
+  tileDraft.fallbackText = '';
 }
 
 function saveTileEdit() {
   if (!editingTileId.value) return;
+  const bodyDelta = tileEditor ? JSON.stringify(sanitizeRichDelta(tileEditor.getContents())) : tileDraft.bodyDelta;
+  const bodyHtml = tileEditor ? sanitizeRichHtml(normalizeEditorHtml(tileEditor.root.innerHTML)) : tileDraft.bodyHtml;
   emit('update-page', {
     id: editingTileId.value,
     title: tileDraft.title,
-    bodyText: tileDraft.bodyText,
+    bodyDelta,
+    bodyHtml,
   });
   cancelTileEdit();
 }
