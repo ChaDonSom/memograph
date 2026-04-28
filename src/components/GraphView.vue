@@ -49,7 +49,7 @@
               :y="tile.rect.y - ROUTE_MASK_CARD_BLEED"
               :width="tile.rect.width + ROUTE_MASK_CARD_BLEED * 2"
               :height="tile.rect.height + ROUTE_MASK_CARD_BLEED * 2"
-              rx="13"
+              :rx="ROUTE_MASK_CARD_BORDER_RADIUS"
               fill="black"
             />
           </mask>
@@ -220,6 +220,7 @@ const MIN_VERTICAL_LABEL_LENGTH = 60;
 const ROUTE_EDGE_PADDING = 18;
 const ROUTE_CARD_CLEARANCE = 24;
 const ROUTE_MASK_CARD_BLEED = 3;
+const ROUTE_MASK_CARD_BORDER_RADIUS = 13;
 const ROUTE_CORNER_RADIUS = 9;
 const SAME_GROUP_ROUTE_PADDING = 24;
 /** Scales down lane offsets for same-group routes because tile-to-tile gaps are already narrow. */
