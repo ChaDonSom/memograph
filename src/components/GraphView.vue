@@ -1049,6 +1049,9 @@ function labelRotation(vertical, startY, endY) {
   return endY < startY ? -90 : 90;
 }
 
+/**
+ * Returns the perpendicular unit vector used to nudge labels away from a route segment.
+ */
 function routeSegmentNormal(segment) {
   if (segment.vertical) return { x: 1, y: 0 };
   return { x: 0, y: -1 };
@@ -1218,6 +1221,9 @@ function routeLabelPlacement(route) {
   };
 }
 
+/**
+ * Estimates the screen-space bounds of a route label, accounting for vertical labels.
+ */
 function labelBounds(label) {
   const width = Math.min(
     LABEL_MAX_WIDTH,
@@ -1233,6 +1239,9 @@ function labelBounds(label) {
   };
 }
 
+/**
+ * Detects whether two label bounds overlap after applying the collision gap.
+ */
 function boundsOverlap(a, b) {
   return a.left < b.right + LABEL_COLLISION_GAP
     && a.right + LABEL_COLLISION_GAP > b.left
@@ -1240,6 +1249,9 @@ function boundsOverlap(a, b) {
     && a.bottom + LABEL_COLLISION_GAP > b.top;
 }
 
+/**
+ * Keeps a label position inside the visible graph stage.
+ */
 function nudgeLabelIntoStage(label) {
   label.x = clamp(label.x, ROUTE_EDGE_PADDING, stageSize.width - ROUTE_EDGE_PADDING);
   label.y = clamp(label.y, PERIMETER_ROUTE_LANE, stageSize.height - PERIMETER_ROUTE_LANE);
@@ -1286,10 +1298,16 @@ const routeLabels = computed(() => {
   });
 });
 
+/**
+ * Calculates Euclidean distance between points shaped as { x, y }.
+ */
 function distanceBetweenPoints(a, b) {
   return Math.hypot(a.x - b.x, a.y - b.y);
 }
 
+/**
+ * Finds a point and direction along a route at a fixed distance back from its end.
+ */
 function pointBackAlongRoute(points, distanceFromEnd) {
   let remaining = distanceFromEnd;
   for (let index = points.length - 1; index > 0; index--) {
@@ -1324,6 +1342,9 @@ function pointBackAlongRoute(points, distanceFromEnd) {
   };
 }
 
+/**
+ * Builds SVG polygon points for an arrowhead tip at point, facing along unit.
+ */
 function arrowheadPolygon(point, unit) {
   const base = {
     x: point.x - unit.x * ARROWHEAD_LENGTH,
@@ -1423,6 +1444,9 @@ function resizeSelectedTileImage(widthPct) {
   hideTileImageResizeBar();
 }
 
+/**
+ * Restores Quill contents from a serialized Delta and reports whether it succeeded.
+ */
 function restoreEditorContents(quill, serializedDelta) {
   try {
     const parsed = JSON.parse(serializedDelta);
