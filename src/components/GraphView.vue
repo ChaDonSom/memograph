@@ -207,6 +207,7 @@ const ROUTE_GUTTER_MAX = 96;
 const STACK_GAP = 12;
 const MIN_STACK_TILE_HEIGHT = 92;
 const MIN_FOCUS_HEIGHT = 210;
+const FOCUS_HEIGHT_RATIO = 0.58;
 const MIN_SIDE_WIDTH = 170;
 const MIN_FOCUS_WIDTH = 230;
 const MAX_VISIBLE_TILES = 28;
@@ -444,7 +445,8 @@ const visibleNodeModels = computed(() => {
 });
 
 function groupWeight(group) {
-  return Math.max(1, Math.sqrt(Number.isFinite(group.value) ? group.value : 1));
+  if (!Number.isFinite(group.value)) return 1;
+  return Math.max(1, Math.sqrt(group.value));
 }
 
 function groupMinWidth(group, availableWidth) {
@@ -510,7 +512,7 @@ function allocateStackHeights(models, availableHeight) {
   if (!models.length) return [];
   const gapTotal = STACK_GAP * Math.max(0, models.length - 1);
   const height = Math.max(1, availableHeight - gapTotal);
-  const weights = models.map(model => Math.max(1, Math.sqrt(model.score || 1)));
+  const weights = models.map(model => model.score > 1 ? Math.sqrt(model.score) : 1);
   const totalWeight = weights.reduce((sum, weight) => sum + weight, 0);
   const minHeight = Math.min(MIN_STACK_TILE_HEIGHT, height / models.length);
   let heights = weights.map(weight => Math.max(minHeight, height * (weight / totalWeight)));
@@ -537,7 +539,7 @@ function stackGroup(group, bounds) {
 
   if (group.key === 'focus') {
     const focus = models[0];
-    const height = Math.min(bounds.height, Math.max(MIN_FOCUS_HEIGHT, bounds.height * 0.58));
+    const height = Math.min(bounds.height, Math.max(MIN_FOCUS_HEIGHT, bounds.height * FOCUS_HEIGHT_RATIO));
     return [{
       ...focus,
       groupKey: group.key,
