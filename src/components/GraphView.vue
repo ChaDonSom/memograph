@@ -122,13 +122,16 @@ const CONTENT_SCORE_CAP = 12;
 const RICHNESS_SCORE_CAP = 10;
 const ENDPOINT_STEP = 12;
 const FOCUS_SCORE_BOOST_RATIO = 1.08;
+// With only a few visible blocks, relax the focus floor so neighbors can approach one-third-screen tiles.
 const MIN_FOCUS_FALLBACK_RATIO = 0.72;
-// Slightly wide squarified tiles leave conduits readable without reverting to long graph rows.
+// Empirically favors slightly wide, readable text blocks while leaving enough gutters for conduits.
 const TREEMAP_ASPECT_RATIO = 1.18;
 const MIN_TILE_FONT_SIZE = 10;
 const TILE_FONT_SCALE = 24;
 const FOCUS_MAX_FONT_SIZE = 18;
 const TILE_MAX_FONT_SIZE = 16;
+const MIN_VERTICAL_LABEL_LENGTH = 60;
+const VERTICAL_LABEL_THRESHOLD_RATIO = 0.35;
 
 function clamp(value, min, max) {
   return Math.min(max, Math.max(min, value));
@@ -482,7 +485,8 @@ const routeLabels = computed(() =>
   routedEdges.value.map(route => {
     const verticalLength = Math.abs(route.endY - route.startY);
     const horizontalLength = Math.abs(route.endX - route.startX);
-    const vertical = verticalLength > 60 && verticalLength > horizontalLength * 0.35;
+    const vertical = verticalLength > MIN_VERTICAL_LABEL_LENGTH
+      && verticalLength > horizontalLength * VERTICAL_LABEL_THRESHOLD_RATIO;
     const rotation = vertical ? (route.endY < route.startY ? -90 : 90) : 0;
     const x = vertical ? route.midX : (route.startX + route.endX) / 2;
     const y = vertical ? (route.startY + route.endY) / 2 : route.endY - 12;
