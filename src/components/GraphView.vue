@@ -179,7 +179,6 @@
 </template>
 
 <script setup>
-import { hierarchy, treemap, treemapSquarify } from 'd3-hierarchy';
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue';
 import { DEFAULT_EDGE_WEIGHT, pScore, timeAgo } from '../utils/scoring.js';
 import { normalizeEditorHtml, sanitizeRichHtml } from '../utils/sanitize.js';
@@ -201,15 +200,16 @@ const editingTileId = ref('');
 const tileDraft = reactive({ title: '', bodyText: '' });
 let resizeObserver = null;
 
-/**
- * Corridor sizing starts with a small base whitespace and grows linearly per shared route.
- */
-const BASE_CORRIDOR_GAP = 12;
-const CORRIDOR_WIDTH_PER_ROUTE = 7;
 const OUTER_PADDING = 18;
-const PERIMETER_ROUTE_LANE = 12;
-const MIN_SIDE_WIDTH = 150;
-const MIN_FOCUS_WIDTH = 210;
+const COLUMN_GAP = 28;
+const ROUTE_GUTTER_BASE = 34;
+const ROUTE_GUTTER_MAX = 96;
+const ROUTE_STUB = 10;
+const STACK_GAP = 12;
+const MIN_STACK_TILE_HEIGHT = 92;
+const MIN_FOCUS_HEIGHT = 210;
+const MIN_SIDE_WIDTH = 170;
+const MIN_FOCUS_WIDTH = 230;
 const MAX_VISIBLE_TILES = 28;
 const FOCUS_MIN_SCORE = 36;
 const HOP_DECAY = 0.58;
@@ -220,8 +220,6 @@ const FOCUS_SCORE_BOOST_RATIO = 1.08;
 // When the map has only a few blocks, lower the focus floor to 72% so two adjacent blocks can grow toward one third of the screen.
 const MIN_FOCUS_FALLBACK_RATIO = 0.72;
 const MIN_TILES_FOR_BALANCED_FOCUS = 3;
-// Empirically favors slightly wide, readable text blocks while leaving enough gutters for conduits.
-const TREEMAP_ASPECT_RATIO = 1.18;
 const MIN_TILE_FONT_SIZE = 10;
 const TILE_FONT_SCALE = 24;
 const FOCUS_MAX_FONT_SIZE = 18;
@@ -232,15 +230,10 @@ const ROUTE_CARD_CLEARANCE = 6;
 const ROUTE_MASK_CARD_BLEED = 3;
 const ROUTE_MASK_CARD_BORDER_RADIUS = 13;
 const ROUTE_CORNER_RADIUS = 9;
-const SAME_GROUP_ROUTE_PADDING = 24;
-/** Scales down lane offsets for same-group routes because tile-to-tile gaps are already narrow. */
-const SAME_GROUP_LANE_FACTOR = 0.45;
-const LANE_STEP = 10;
+const LANE_STEP = 12;
 const LABEL_DEFAULT_OFFSET = 12;
 const ROUTE_HIT_PADDING = 10;
-const ROUTE_OBSTACLE_EPSILON = 0.01;
-const ROUTE_TURN_PENALTY = 14;
-const ROUTE_COORDINATE_PRECISION = 100;
+const LOCAL_LOOP_GAP = 18;
 
 function clamp(value, min, max) {
   return Math.min(max, Math.max(min, value));
@@ -451,70 +444,8 @@ const visibleNodeModels = computed(() => {
   return models;
 });
 
-function treemapGroup(models, bounds) {
-  if (!models.length || bounds.width <= 0 || bounds.height <= 0) return [];
-  const root = hierarchy({
-    children: models.map(model => ({
-      ...model,
-      value: Math.max(1, model.score),
-    })),
-  }).sum(item => item.value || 0);
-
-  treemap()
-    .tile(treemapSquarify.ratio(TREEMAP_ASPECT_RATIO))
-    .size([bounds.width, bounds.height])
-    .paddingInner(bounds.padding)
-    .round(true)(root);
-
-  return root.leaves().map(leaf => ({
-    ...leaf.data,
-    groupKey: bounds.groupKey,
-    groupIndex: bounds.groupIndex,
-    x: bounds.x + leaf.x0,
-    y: bounds.y + leaf.y0,
-    width: Math.max(1, leaf.x1 - leaf.x0),
-    height: Math.max(1, leaf.y1 - leaf.y0),
-  }));
-}
-
-function corridorWidth(routeCount) {
-  return BASE_CORRIDOR_GAP + routeCount * CORRIDOR_WIDTH_PER_ROUTE;
-}
-
-function createCorridorLoadsArray(groupCount) {
-  return Array.from({ length: Math.max(0, groupCount - 1) }, () => 0);
-}
-
-function groupForNode(groupsByNodeId, nodeId) {
-  return groupsByNodeId.get(nodeId);
-}
-
-function corridorLoadsForGroups(groups, groupsByNodeId) {
-  const loads = createCorridorLoadsArray(groups.length);
-  for (const edge of props.edges) {
-    const from = groupForNode(groupsByNodeId, edge.fromId);
-    const to = groupForNode(groupsByNodeId, edge.toId);
-    if (!from || !to || from.index === to.index) continue;
-    const start = Math.min(from.index, to.index);
-    const end = Math.max(from.index, to.index);
-    for (let i = start; i < end; i++) loads[i]++;
-  }
-  return loads;
-}
-
-function internalGroupLoads(groupsByNodeId) {
-  const loads = new Map();
-  for (const edge of props.edges) {
-    const from = groupForNode(groupsByNodeId, edge.fromId);
-    const to = groupForNode(groupsByNodeId, edge.toId);
-    if (!from || !to || from.index !== to.index) continue;
-    loads.set(from.key, (loads.get(from.key) || 0) + 1);
-  }
-  return loads;
-}
-
 function groupWeight(group) {
-  return Math.max(1, group.value);
+  return Math.max(1, Math.sqrt(group.value || 1));
 }
 
 function groupMinWidth(group, availableWidth) {
@@ -550,6 +481,93 @@ function allocateGroupWidths(groups, availableWidth) {
   return widths;
 }
 
+function routeGutterWidth(routeCount) {
+  if (routeCount <= 0) return COLUMN_GAP;
+  return clamp(ROUTE_GUTTER_BASE + Math.max(0, routeCount - 1) * LANE_STEP, COLUMN_GAP, ROUTE_GUTTER_MAX);
+}
+
+function createCorridorLoadsArray(groupCount) {
+  return Array.from({ length: Math.max(0, groupCount - 1) }, () => 0);
+}
+
+function groupForNode(groupsByNodeId, nodeId) {
+  return groupsByNodeId.get(nodeId);
+}
+
+function visibleCorridorLoads(groups, groupsByNodeId) {
+  const loads = createCorridorLoadsArray(groups.length);
+  for (const edge of props.edges) {
+    const from = groupForNode(groupsByNodeId, edge.fromId);
+    const to = groupForNode(groupsByNodeId, edge.toId);
+    if (!from || !to || from.index === to.index) continue;
+    const start = Math.min(from.index, to.index);
+    const end = Math.max(from.index, to.index);
+    for (let index = start; index < end; index++) loads[index]++;
+  }
+  return loads;
+}
+
+function allocateStackHeights(models, availableHeight) {
+  if (!models.length) return [];
+  const gapTotal = STACK_GAP * Math.max(0, models.length - 1);
+  const height = Math.max(1, availableHeight - gapTotal);
+  const weights = models.map(model => Math.max(1, Math.sqrt(model.score || 1)));
+  const totalWeight = weights.reduce((sum, weight) => sum + weight, 0);
+  const minHeight = Math.min(MIN_STACK_TILE_HEIGHT, height / models.length);
+  let heights = weights.map(weight => Math.max(minHeight, height * (weight / totalWeight)));
+  const totalHeight = heights.reduce((sum, item) => sum + item, 0);
+
+  if (totalHeight > height) {
+    const scale = height / totalHeight;
+    heights = heights.map(item => Math.max(1, item * scale));
+  } else if (totalHeight < height) {
+    const extra = height - totalHeight;
+    heights = heights.map((item, index) => item + extra * (weights[index] / totalWeight));
+  }
+
+  return heights;
+}
+
+function stackGroup(group, bounds) {
+  if (!group.models.length || bounds.width <= 0 || bounds.height <= 0) return [];
+  const models = [...group.models].sort((a, b) => a.hop - b.hop || b.score - a.score || a.node.id.localeCompare(b.node.id));
+
+  if (group.key === 'focus') {
+    const focus = models[0];
+    const height = Math.min(bounds.height, Math.max(MIN_FOCUS_HEIGHT, bounds.height * 0.58));
+    return [{
+      ...focus,
+      groupKey: group.key,
+      groupIndex: group.index,
+      groupX: bounds.x,
+      groupWidth: bounds.width,
+      x: bounds.x,
+      y: bounds.y + (bounds.height - height) / 2,
+      width: bounds.width,
+      height,
+    }];
+  }
+
+  const heights = allocateStackHeights(models, bounds.height);
+  let y = bounds.y;
+  return models.map((model, index) => {
+    const height = heights[index];
+    const laidOut = {
+      ...model,
+      groupKey: group.key,
+      groupIndex: group.index,
+      groupX: bounds.x,
+      groupWidth: bounds.width,
+      x: bounds.x,
+      y,
+      width: bounds.width,
+      height,
+    };
+    y += height + STACK_GAP;
+    return laidOut;
+  });
+}
+
 const layoutState = computed(() => {
   const width = stageSize.width - OUTER_PADDING * 2;
   const height = stageSize.height - OUTER_PADDING * 2;
@@ -575,12 +593,10 @@ const layoutState = computed(() => {
     }
   }
 
-  const corridorLoads = corridorLoadsForGroups(groups, groupsByNodeId);
-  const corridorWidths = corridorLoads.map(corridorWidth);
-  const internalLoads = internalGroupLoads(groupsByNodeId);
+  const corridorLoads = visibleCorridorLoads(groups, groupsByNodeId);
+  const corridorWidths = corridorLoads.map(routeGutterWidth);
   const gapTotal = corridorWidths.reduce((sum, gap) => sum + gap, 0);
   const availableWidth = Math.max(1, width - gapTotal);
-  // For multiple groups, enforce minimum widths to preserve readable columns; single-group layouts fill the stage naturally.
   const widths = allocateGroupWidths(groups, availableWidth);
 
   let x = OUTER_PADDING;
@@ -588,27 +604,13 @@ const layoutState = computed(() => {
   const corridors = [];
   for (const group of groups) {
     const groupWidth = widths.get(group.key);
-    if (group.key === 'focus') {
-      laidOut.push({
-        ...focus,
-        groupKey: group.key,
-        groupIndex: group.index,
-        x,
-        y: OUTER_PADDING,
-        width: groupWidth,
-        height,
-      });
-    } else {
-      laidOut.push(...treemapGroup(group.models, {
-        x,
-        y: OUTER_PADDING,
-        width: groupWidth,
-        height,
-        padding: corridorWidth(internalLoads.get(group.key) || 0),
-        groupKey: group.key,
-        groupIndex: group.index,
-      }));
-    }
+    laidOut.push(...stackGroup(group, {
+      x,
+      y: OUTER_PADDING,
+      width: groupWidth,
+      height,
+    }));
+
     const gapWidth = corridorWidths[group.index] || 0;
     if (gapWidth) {
       corridors[group.index] = {
@@ -681,22 +683,11 @@ function rectCenter(rect) {
   };
 }
 
-function oppositeSide(side) {
-  return { left: 'right', right: 'left', top: 'bottom', bottom: 'top' }[side];
-}
-
-function horizontalRouteSides(from, to) {
-  return rectCenter(from).x <= rectCenter(to).x
-    ? { startSide: 'right', endSide: 'left' }
-    : { startSide: 'left', endSide: 'right' };
-}
-
-function sameGroupRouteSides(from, to) {
-  if (from.x + from.width <= to.x) return { startSide: 'right', endSide: 'left', axis: 'x' };
-  else if (to.x + to.width <= from.x) return { startSide: 'left', endSide: 'right', axis: 'x' };
-  else if (from.y + from.height <= to.y) return { startSide: 'bottom', endSide: 'top', axis: 'y' };
-  else if (to.y + to.height <= from.y) return { startSide: 'top', endSide: 'bottom', axis: 'y' };
-  return { ...horizontalRouteSides(from, to), axis: 'overflow' };
+function routeSideForGroups(from, to) {
+  if (from.groupIndex < to.groupIndex) return { startSide: 'right', endSide: 'left', direction: 'forward' };
+  if (from.groupIndex > to.groupIndex) return { startSide: 'left', endSide: 'right', direction: 'backward' };
+  const side = from.groupKey === 'incoming' ? 'left' : 'right';
+  return { startSide: side, endSide: side, direction: rectCenter(from).y <= rectCenter(to).y ? 'down' : 'up' };
 }
 
 function pointOutsideRect(rect, side, offset) {
@@ -712,21 +703,6 @@ function pointOutsideRect(rect, side, offset) {
   };
 }
 
-function adjacentCorridorBetween(from, to) {
-  const lowerGroupIndex = Math.min(from.groupIndex, to.groupIndex);
-  return routeCorridors.value[lowerGroupIndex] || null;
-}
-
-function laneXInCorridor(corridor, laneOffset) {
-  if (!corridor) return null;
-  const center = corridor.x + corridor.width / 2;
-  return clamp(
-    center + laneOffset,
-    corridor.x + ROUTE_EDGE_PADDING / 2,
-    corridor.x + corridor.width - ROUTE_EDGE_PADDING / 2
-  );
-}
-
 function corridorIndexesBetween(from, to) {
   const start = Math.min(from.groupIndex, to.groupIndex);
   const end = Math.max(from.groupIndex, to.groupIndex);
@@ -735,17 +711,32 @@ function corridorIndexesBetween(from, to) {
   return indexes;
 }
 
-/**
- * Returns a symmetric pixel offset around zero for evenly spacing endpoints or lanes.
- * Pass a smaller step for route lanes and the default step for card-edge endpoints.
- */
 function distributeOffset(index, count, step = ENDPOINT_STEP) {
   return (index - (count - 1) / 2) * step;
 }
 
-/**
- * Builds an SVG path from axis-aligned points and rounds each turn with a quadratic curve.
- */
+function laneCoordinate(corridor, index, count) {
+  const usableLeft = corridor.x + ROUTE_EDGE_PADDING / 2;
+  const usableRight = corridor.x + corridor.width - ROUTE_EDGE_PADDING / 2;
+  if (count <= 1) return (usableLeft + usableRight) / 2;
+  const usableWidth = Math.max(1, usableRight - usableLeft);
+  const step = Math.min(LANE_STEP, usableWidth / (count - 1));
+  return clamp((usableLeft + usableRight) / 2 + distributeOffset(index, count, step), usableLeft, usableRight);
+}
+
+function localLoopX(rect, laneIndex, side) {
+  const offset = LOCAL_LOOP_GAP + laneIndex * LANE_STEP;
+  if (side === 'left') return clamp(rect.groupX - offset, ROUTE_EDGE_PADDING, stageSize.width - ROUTE_EDGE_PADDING);
+  return clamp(rect.groupX + rect.groupWidth + offset, ROUTE_EDGE_PADDING, stageSize.width - ROUTE_EDGE_PADDING);
+}
+
+function perimeterLaneY(index, start, end) {
+  const useTop = start.y + end.y <= (stageSize.height - start.y) + (stageSize.height - end.y);
+  const base = useTop ? ROUTE_EDGE_PADDING : stageSize.height - ROUTE_EDGE_PADDING;
+  const offset = index * LANE_STEP;
+  return clamp(useTop ? base + offset : base - offset, ROUTE_EDGE_PADDING, stageSize.height - ROUTE_EDGE_PADDING);
+}
+
 function roundedOrthogonalPath(points) {
   if (points.length < 2) return '';
   const commands = [`M ${points[0].x} ${points[0].y}`];
@@ -776,234 +767,6 @@ function roundedOrthogonalPath(points) {
   return commands.join(' ');
 }
 
-function createVerticalBendPoints(start, end, midX) {
-  return [start, { x: midX, y: start.y }, { x: midX, y: end.y }, end];
-}
-
-function inflateRect(rect, amount) {
-  return {
-    x: rect.x - amount,
-    y: rect.y - amount,
-    width: rect.width + amount * 2,
-    height: rect.height + amount * 2,
-  };
-}
-
-function pointInRectInterior(point, rect) {
-  return point.x > rect.x + ROUTE_OBSTACLE_EPSILON
-    && point.x < rect.x + rect.width - ROUTE_OBSTACLE_EPSILON
-    && point.y > rect.y + ROUTE_OBSTACLE_EPSILON
-    && point.y < rect.y + rect.height - ROUTE_OBSTACLE_EPSILON;
-}
-
-function rangesOverlap(startA, endA, startB, endB) {
-  const overlapStart = Math.max(Math.min(startA, endA), Math.min(startB, endB));
-  const overlapEnd = Math.min(Math.max(startA, endA), Math.max(startB, endB));
-  return overlapStart + ROUTE_OBSTACLE_EPSILON < overlapEnd;
-}
-
-function segmentIntersectsRect(start, end, rect) {
-  if (start.x === end.x) {
-    return start.x > rect.x + ROUTE_OBSTACLE_EPSILON
-      && start.x < rect.x + rect.width - ROUTE_OBSTACLE_EPSILON
-      && rangesOverlap(start.y, end.y, rect.y, rect.y + rect.height);
-  }
-  if (start.y === end.y) {
-    return start.y > rect.y + ROUTE_OBSTACLE_EPSILON
-      && start.y < rect.y + rect.height - ROUTE_OBSTACLE_EPSILON
-      && rangesOverlap(start.x, end.x, rect.x, rect.x + rect.width);
-  }
-  return false;
-}
-
-function routeObstacleRects() {
-  return visibleTiles.value.map(tile => inflateRect(tile.rect, ROUTE_MASK_CARD_BLEED));
-}
-
-function segmentBlocked(start, end, obstacles) {
-  return obstacles.some(rect => segmentIntersectsRect(start, end, rect));
-}
-
-function routeIsClear(points, obstacles) {
-  for (let index = 1; index < points.length; index++) {
-    if (segmentBlocked(points[index - 1], points[index], obstacles)) return false;
-  }
-  return true;
-}
-
-function uniqueSortedLines(values, min, max) {
-  return [...new Set(values
-    .map(value => roundToRoutePrecision(clamp(value, min, max))))]
-    .sort((a, b) => a - b);
-}
-
-function roundToRoutePrecision(value) {
-  return Math.round(value * ROUTE_COORDINATE_PRECISION) / ROUTE_COORDINATE_PRECISION;
-}
-
-function routePoint(point) {
-  return {
-    x: roundToRoutePrecision(point.x),
-    y: roundToRoutePrecision(point.y),
-  };
-}
-
-function routeGridLines(start, end, preferredPoints, obstacles) {
-  const validPreferredPoints = preferredPoints.filter(point => point && Number.isFinite(point.x) && Number.isFinite(point.y));
-  const xLines = [
-    ROUTE_EDGE_PADDING,
-    stageSize.width - ROUTE_EDGE_PADDING,
-    start.x,
-    end.x,
-    ...validPreferredPoints.map(point => point.x),
-  ];
-  const yLines = [
-    PERIMETER_ROUTE_LANE,
-    stageSize.height - PERIMETER_ROUTE_LANE,
-    start.y,
-    end.y,
-    ...validPreferredPoints.map(point => point.y),
-  ];
-  for (const rect of obstacles) {
-    xLines.push(rect.x - ROUTE_CARD_CLEARANCE, rect.x + rect.width + ROUTE_CARD_CLEARANCE);
-    yLines.push(rect.y - ROUTE_CARD_CLEARANCE, rect.y + rect.height + ROUTE_CARD_CLEARANCE);
-  }
-  for (const corridor of routeCorridors.value.filter(Boolean)) {
-    xLines.push(
-      corridor.x + ROUTE_EDGE_PADDING / 2,
-      corridor.x + corridor.width / 2,
-      corridor.x + corridor.width - ROUTE_EDGE_PADDING / 2
-    );
-  }
-  return {
-    xLines: uniqueSortedLines(xLines, ROUTE_EDGE_PADDING, stageSize.width - ROUTE_EDGE_PADDING),
-    yLines: uniqueSortedLines(yLines, PERIMETER_ROUTE_LANE, stageSize.height - PERIMETER_ROUTE_LANE),
-  };
-}
-
-function compactOrthogonalPoints(points) {
-  if (points.length <= 2) return points;
-  const compacted = [points[0]];
-  for (let index = 1; index < points.length - 1; index++) {
-    const previous = compacted[compacted.length - 1];
-    const current = points[index];
-    const next = points[index + 1];
-    if ((previous.x === current.x && current.x === next.x)
-      || (previous.y === current.y && current.y === next.y)) continue;
-    compacted.push(current);
-  }
-  compacted.push(points[points.length - 1]);
-  return compacted;
-}
-
-function enqueueRouteState(queue, entry) {
-  queue.push(entry);
-  let index = queue.length - 1;
-  while (index > 0) {
-    const parentIndex = Math.floor((index - 1) / 2);
-    if (queue[parentIndex].cost <= queue[index].cost) break;
-    [queue[parentIndex], queue[index]] = [queue[index], queue[parentIndex]];
-    index = parentIndex;
-  }
-}
-
-function dequeueRouteState(queue) {
-  if (queue.length <= 1) return queue.pop();
-  const next = queue[0];
-  queue[0] = queue.pop();
-  let index = 0;
-  while (true) {
-    const leftIndex = index * 2 + 1;
-    const rightIndex = leftIndex + 1;
-    let smallestIndex = index;
-    if (leftIndex < queue.length && queue[leftIndex].cost < queue[smallestIndex].cost) {
-      smallestIndex = leftIndex;
-    }
-    if (rightIndex < queue.length && queue[rightIndex].cost < queue[smallestIndex].cost) {
-      smallestIndex = rightIndex;
-    }
-    if (smallestIndex === index) break;
-    [queue[index], queue[smallestIndex]] = [queue[smallestIndex], queue[index]];
-    index = smallestIndex;
-  }
-  return next;
-}
-
-function findClearOrthogonalRoute(points) {
-  points = points.map(routePoint);
-  const obstacles = routeObstacleRects();
-  if (routeIsClear(points, obstacles)) return compactOrthogonalPoints(points);
-
-  const start = points[0];
-  const end = points[points.length - 1];
-  const { xLines, yLines } = routeGridLines(start, end, points, obstacles);
-  const nodeKey = (x, y) => `${x},${y}`;
-  const parseKey = key => {
-    const [x, y] = key.split(',').map(Number);
-    return { x, y };
-  };
-  const nodeAllowed = (x, y) => {
-    const point = { x, y };
-    if ((x === start.x && y === start.y) || (x === end.x && y === end.y)) return true;
-    return !obstacles.some(rect => pointInRectInterior(point, rect));
-  };
-  const distances = new Map();
-  const previous = new Map();
-  const queue = [];
-  // Search states are encoded as "x,y|previousAxis" where previousAxis is "none", "x", or "y".
-  // Keeping the axis in the state lets turn penalties distinguish approaches to the same point.
-  const startState = `${nodeKey(start.x, start.y)}|none`;
-  distances.set(startState, 0);
-  enqueueRouteState(queue, { state: startState, cost: 0 });
-
-  while (queue.length) {
-    const { state, cost } = dequeueRouteState(queue);
-    if (cost !== distances.get(state)) continue;
-    const [key, previousAxis] = state.split('|');
-    const current = parseKey(key);
-    if (current.x === end.x && current.y === end.y) {
-      const route = [];
-      let cursor = state;
-      while (cursor) {
-        route.push(parseKey(cursor.split('|')[0]));
-        cursor = previous.get(cursor);
-      }
-      return compactOrthogonalPoints(route.reverse());
-    }
-
-    const xIndex = xLines.indexOf(current.x);
-    const yIndex = yLines.indexOf(current.y);
-    const neighbors = [
-      xIndex > 0 ? { x: xLines[xIndex - 1], y: current.y, axis: 'x' } : null,
-      xIndex < xLines.length - 1 ? { x: xLines[xIndex + 1], y: current.y, axis: 'x' } : null,
-      yIndex > 0 ? { x: current.x, y: yLines[yIndex - 1], axis: 'y' } : null,
-      yIndex < yLines.length - 1 ? { x: current.x, y: yLines[yIndex + 1], axis: 'y' } : null,
-    ].filter(Boolean);
-
-    for (const neighbor of neighbors) {
-      if (!nodeAllowed(neighbor.x, neighbor.y)) continue;
-      const next = { x: neighbor.x, y: neighbor.y };
-      if (segmentBlocked(current, next, obstacles)) continue;
-      const turnCost = previousAxis !== 'none' && previousAxis !== neighbor.axis ? ROUTE_TURN_PENALTY : 0;
-      const nextCost = cost + Math.abs(next.x - current.x) + Math.abs(next.y - current.y) + turnCost;
-      const nextState = `${nodeKey(next.x, next.y)}|${neighbor.axis}`;
-      const existingCost = distances.get(nextState);
-      if (existingCost !== undefined && nextCost >= existingCost) continue;
-      distances.set(nextState, nextCost);
-      previous.set(nextState, state);
-      enqueueRouteState(queue, { state: nextState, cost: nextCost });
-    }
-  }
-
-  return compactOrthogonalPoints(points);
-}
-
-function perimeterLaneY(start, end) {
-  const topCost = start.y + end.y;
-  const bottomCost = (stageSize.height - start.y) + (stageSize.height - end.y);
-  return topCost <= bottomCost ? PERIMETER_ROUTE_LANE : stageSize.height - PERIMETER_ROUTE_LANE;
-}
-
 function labelRotation(vertical, startY, endY) {
   if (!vertical) return 0;
   return endY < startY ? -90 : 90;
@@ -1014,8 +777,7 @@ const routedEdges = computed(() => {
     const from = tileRects.value.get(edge.fromId);
     const to = tileRects.value.get(edge.toId);
     const groupDistance = Math.abs(from.groupIndex - to.groupIndex);
-    const sides = groupDistance === 0 ? sameGroupRouteSides(from, to) : horizontalRouteSides(from, to);
-    return { edge, from, to, groupDistance, ...sides };
+    return { edge, from, to, groupDistance, ...routeSideForGroups(from, to) };
   });
 
   const endpointOffsets = new Map();
@@ -1040,78 +802,75 @@ const routedEdges = computed(() => {
       });
   }
 
-  const corridorLaneOffsets = new Map();
+  const corridorLaneIndexes = new Map();
   const corridorLaneGroups = new Map();
+  const localLaneIndexes = new Map();
+  const localLaneGroups = new Map();
+  const perimeterLaneIndexes = new Map();
+  const perimeterPlans = [];
+
   for (const plan of plans) {
-    for (const corridorIndex of corridorIndexesBetween(plan.from, plan.to)) {
-      if (!corridorLaneGroups.has(corridorIndex)) corridorLaneGroups.set(corridorIndex, []);
-      corridorLaneGroups.get(corridorIndex).push({
-        id: plan.edge.id,
-        sortKey: (rectCenter(plan.from).y + rectCenter(plan.to).y) / 2,
-      });
+    if (plan.groupDistance === 0) {
+      const key = `${plan.from.groupIndex}:${plan.startSide}:${plan.direction}`;
+      if (!localLaneGroups.has(key)) localLaneGroups.set(key, []);
+      localLaneGroups.get(key).push(plan);
+      continue;
     }
+
+    for (const corridorIndex of corridorIndexesBetween(plan.from, plan.to)) {
+      const key = `${corridorIndex}`;
+      if (!corridorLaneGroups.has(key)) corridorLaneGroups.set(key, []);
+      corridorLaneGroups.get(key).push(plan);
+    }
+    if (plan.groupDistance > 1) perimeterPlans.push(plan);
   }
-  for (const [corridorIndex, routes] of corridorLaneGroups) {
-    routes
-      .sort((a, b) => a.sortKey - b.sortKey || a.id.localeCompare(b.id))
-      .forEach((route, index) => {
-        corridorLaneOffsets.set(`${route.id}:${corridorIndex}`, distributeOffset(index, routes.length, LANE_STEP));
-      });
+
+  for (const [key, group] of corridorLaneGroups) {
+    group
+      .sort((a, b) => (rectCenter(a.from).y + rectCenter(a.to).y) - (rectCenter(b.from).y + rectCenter(b.to).y) || a.edge.id.localeCompare(b.edge.id))
+      .forEach((plan, index) => corridorLaneIndexes.set(`${plan.edge.id}:${key}`, { index, count: group.length }));
   }
+
+  for (const group of localLaneGroups.values()) {
+    group
+      .sort((a, b) => (rectCenter(a.from).y + rectCenter(a.to).y) - (rectCenter(b.from).y + rectCenter(b.to).y) || a.edge.id.localeCompare(b.edge.id))
+      .forEach((plan, index) => localLaneIndexes.set(plan.edge.id, index));
+  }
+
+  perimeterPlans
+    .sort((a, b) => (rectCenter(a.from).y + rectCenter(a.to).y) - (rectCenter(b.from).y + rectCenter(b.to).y) || a.edge.id.localeCompare(b.edge.id))
+    .forEach((plan, index) => perimeterLaneIndexes.set(plan.edge.id, index));
 
   return plans.map(plan => {
     const { edge, from, to, groupDistance } = plan;
     const start = pointOutsideRect(from, plan.startSide, endpointOffsets.get(`${edge.id}:start`) || 0);
     const end = pointOutsideRect(to, plan.endSide, endpointOffsets.get(`${edge.id}:end`) || 0);
     let points = [];
-    if (groupDistance === 1) {
-      const corridor = adjacentCorridorBetween(from, to);
-      const laneOffset = corridorLaneOffsets.get(`${edge.id}:${Math.min(from.groupIndex, to.groupIndex)}`) || 0;
-      const midX = laneXInCorridor(corridor, laneOffset) ?? (start.x + end.x) / 2;
-      points = createVerticalBendPoints(start, end, midX);
-    } else if (groupDistance > 1) {
+
+    if (groupDistance === 0) {
+      const laneX = localLoopX(from, localLaneIndexes.get(edge.id) || 0, plan.startSide);
+      points = [start, { x: laneX, y: start.y }, { x: laneX, y: end.y }, end];
+    } else if (groupDistance === 1) {
+      const corridorIndex = Math.min(from.groupIndex, to.groupIndex);
+      const corridor = routeCorridors.value[corridorIndex];
+      const lane = corridorLaneIndexes.get(`${edge.id}:${corridorIndex}`) || { index: 0, count: 1 };
+      const laneX = corridor ? laneCoordinate(corridor, lane.index, lane.count) : (start.x + end.x) / 2;
+      points = [start, { x: laneX, y: start.y }, { x: laneX, y: end.y }, end];
+    } else {
       const corridorIndexes = corridorIndexesBetween(from, to);
       const firstCorridorIndex = corridorIndexes[0];
       const lastCorridorIndex = corridorIndexes[corridorIndexes.length - 1];
-      const firstCorridor = routeCorridors.value[firstCorridorIndex] || null;
-      const lastCorridor = routeCorridors.value[lastCorridorIndex] || null;
-      const firstLane = corridorLaneOffsets.get(`${edge.id}:${firstCorridorIndex}`) || 0;
-      const lastLane = corridorLaneOffsets.get(`${edge.id}:${lastCorridorIndex}`) || firstLane;
-      const startMidX = laneXInCorridor(firstCorridor, firstLane) ?? start.x;
-      const endMidX = laneXInCorridor(lastCorridor, lastLane) ?? end.x;
-      const perimeterY = perimeterLaneY(start, end);
-      points = [
-        start,
-        { x: startMidX, y: start.y },
-        { x: startMidX, y: perimeterY },
-        { x: endMidX, y: perimeterY },
-        { x: endMidX, y: end.y },
-        end,
-      ];
-    } else if (plan.axis === 'y') {
-      const top = plan.startSide === 'bottom' ? from.y + from.height : to.y + to.height;
-      const bottom = plan.startSide === 'bottom' ? to.y : from.y;
-      const laneOffset = (endpointOffsets.get(`${edge.id}:start`) || 0) * SAME_GROUP_LANE_FACTOR;
-      const midY = (top + bottom) / 2 + laneOffset;
-      points = [start, { x: start.x, y: midY }, { x: end.x, y: midY }, end];
-    } else if (plan.axis === 'x') {
-      const left = plan.startSide === 'right' ? from.x + from.width : to.x + to.width;
-      const right = plan.startSide === 'right' ? to.x : from.x;
-      const laneOffset = (endpointOffsets.get(`${edge.id}:start`) || 0) * SAME_GROUP_LANE_FACTOR;
-      const midX = (left + right) / 2 + laneOffset;
-      points = createVerticalBendPoints(start, end, midX);
-    } else {
-      const routeOnRight = plan.startSide === 'right';
-      const rawMidX = routeOnRight
-        ? Math.max(from.x + from.width, to.x + to.width) + SAME_GROUP_ROUTE_PADDING
-        : Math.min(from.x, to.x) - SAME_GROUP_ROUTE_PADDING;
-      const laneOffset = endpointOffsets.get(`${edge.id}:start`) || 0;
-      const midX = clamp(rawMidX + (routeOnRight ? laneOffset : -laneOffset), ROUTE_EDGE_PADDING, stageSize.width - ROUTE_EDGE_PADDING);
-      points = createVerticalBendPoints(start, end, midX);
+      const firstCorridor = routeCorridors.value[firstCorridorIndex];
+      const lastCorridor = routeCorridors.value[lastCorridorIndex];
+      const firstLane = corridorLaneIndexes.get(`${edge.id}:${firstCorridorIndex}`) || { index: 0, count: 1 };
+      const lastLane = corridorLaneIndexes.get(`${edge.id}:${lastCorridorIndex}`) || firstLane;
+      const startLaneX = firstCorridor ? laneCoordinate(firstCorridor, firstLane.index, firstLane.count) : start.x;
+      const endLaneX = lastCorridor ? laneCoordinate(lastCorridor, lastLane.index, lastLane.count) : end.x;
+      const y = perimeterLaneY(perimeterLaneIndexes.get(edge.id) || 0, start, end);
+      points = [start, { x: startLaneX, y: start.y }, { x: startLaneX, y }, { x: endLaneX, y }, { x: endLaneX, y: end.y }, end];
     }
 
     const strokeWidth = 1.1 + Math.min(1.8, (edge.weight || DEFAULT_EDGE_WEIGHT) / 8);
-    points = findClearOrthogonalRoute(points);
     return {
       id: edge.id,
       edge,
