@@ -445,8 +445,12 @@ const visibleNodeModels = computed(() => {
 });
 
 function groupWeight(group) {
-  if (!Number.isFinite(group.value)) return 1;
+  if (group.value == null || !Number.isFinite(group.value)) return 1;
   return Math.max(1, Math.sqrt(group.value));
+}
+
+function tileWeight(model) {
+  return model.score > 1 ? Math.sqrt(model.score) : 1;
 }
 
 function groupMinWidth(group, availableWidth) {
@@ -512,7 +516,7 @@ function allocateStackHeights(models, availableHeight) {
   if (!models.length) return [];
   const gapTotal = STACK_GAP * Math.max(0, models.length - 1);
   const height = Math.max(1, availableHeight - gapTotal);
-  const weights = models.map(model => model.score > 1 ? Math.sqrt(model.score) : 1);
+  const weights = models.map(tileWeight);
   const totalWeight = weights.reduce((sum, weight) => sum + weight, 0);
   const minHeight = Math.min(MIN_STACK_TILE_HEIGHT, height / models.length);
   let heights = weights.map(weight => Math.max(minHeight, height * (weight / totalWeight)));
@@ -529,13 +533,13 @@ function allocateStackHeights(models, availableHeight) {
   return heights;
 }
 
-function compareModelsForStackLayout(a, b) {
+function compareStackModels(a, b) {
   return a.hop - b.hop || b.score - a.score || a.node.id.localeCompare(b.node.id);
 }
 
 function stackGroup(group, bounds) {
   if (!group.models.length || bounds.width <= 0 || bounds.height <= 0) return [];
-  const models = [...group.models].sort(compareModelsForStackLayout);
+  const models = [...group.models].sort(compareStackModels);
 
   if (group.key === 'focus') {
     const focus = models[0];
@@ -732,6 +736,7 @@ function laneCoordinate(corridor, index, count) {
 }
 
 function localLoopX(rect, laneIndex, side) {
+  // Tile rects normally carry group bounds; fall back to card bounds for defensive pure-helper reuse.
   const groupX = Number.isFinite(rect.groupX) ? rect.groupX : rect.x;
   const groupWidth = Number.isFinite(rect.groupWidth) ? rect.groupWidth : rect.width;
   const offset = LOCAL_LOOP_GAP + laneIndex * LANE_STEP;
