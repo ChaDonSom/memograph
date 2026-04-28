@@ -372,8 +372,8 @@
       :current-id="currentId"
       @navigate="navigateToNode"
       @add-relation="openModal"
-      @edit-page="editPageFromGraph"
       @delete-page="deletePageFromGraph"
+      @update-page="updatePageFromGraph"
       @edit-relation="editRelationFromGraph"
       @delete-relation="deleteRelationFromGraph"
     />
@@ -1633,17 +1633,29 @@ function dropRelationEdge(relation) {
   if (relation.graphEdgeId) dropEdge(relation.graphEdgeId);
 }
 
-async function editPageFromGraph(id) {
-  await loadNode(id);
-  await selectMainView('editor');
-}
-
 function deletePageFromGraph(id) {
   if (id === currentId.value) {
     deletePage();
     return;
   }
   deleteRelatedPage(id);
+}
+
+function graphBodyHtmlFromText(bodyText) {
+  const normalized = normalizeNewlines(bodyText).trim();
+  if (!normalized) return '';
+  return `<p>${escapeHtml(normalized).replace(/\n/g, '<br>')}</p>`;
+}
+
+function updatePageFromGraph({ id, title, bodyText }) {
+  const node = findNode(id);
+  if (!node) return;
+  const normalizedBody = normalizeNewlines(bodyText).trim();
+  node.title = title.trim();
+  node.bodyHtml = sanitizeRichHtml(graphBodyHtmlFromText(normalizedBody));
+  node.bodyDelta = JSON.stringify({ ops: [{ insert: normalizedBody ? `${normalizedBody}\n` : '\n' }] });
+  node.updatedAt = Date.now();
+  persist();
 }
 
 function graphRelationForEdge(edge) {

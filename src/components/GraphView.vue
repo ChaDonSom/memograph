@@ -76,20 +76,45 @@
           <span>{{ tile.roleLabel }}</span>
           <span>P={{ tile.scoreLabel }}</span>
         </span>
-        <span class="memo-map-tile-title">{{ tile.title }}</span>
-        <span
-          v-if="tile.bodyHtml"
-          class="memo-map-tile-body rel-rich"
-          v-html="tile.bodyHtml"
-        ></span>
-        <span v-else class="memo-map-tile-body memo-map-tile-body--empty">
-          No page details yet.
-        </span>
-        <span class="memo-map-tile-meta">{{ tile.meta }}</span>
-        <span class="memo-map-tile-actions" @click.stop>
-          <button type="button" class="memo-map-action" :aria-label="`Edit ${tile.title}`" @click="$emit('edit-page', tile.id)" @keydown.stop>Edit page</button>
-          <button type="button" class="memo-map-action memo-map-action--danger" :aria-label="`Delete ${tile.title}`" @click="$emit('delete-page', tile.id)" @keydown.stop>Delete page</button>
-        </span>
+        <form
+          v-if="editingTileId === tile.id"
+          class="memo-map-tile-editor"
+          @click.stop
+          @submit.prevent="saveTileEdit"
+        >
+          <input
+            v-model="tileDraft.title"
+            class="memo-map-tile-title-input"
+            placeholder="Page title…"
+            @keydown.stop
+          />
+          <textarea
+            v-model="tileDraft.bodyText"
+            class="memo-map-tile-body-input"
+            placeholder="Page details…"
+            @keydown.stop
+          ></textarea>
+          <span class="memo-map-tile-editor-actions">
+            <button type="submit" class="memo-map-action">Save</button>
+            <button type="button" class="memo-map-action" @click="cancelTileEdit">Cancel</button>
+          </span>
+        </form>
+        <template v-else>
+          <span class="memo-map-tile-title">{{ tile.title }}</span>
+          <span
+            v-if="tile.bodyHtml"
+            class="memo-map-tile-body rel-rich"
+            v-html="tile.bodyHtml"
+          ></span>
+          <span v-else class="memo-map-tile-body memo-map-tile-body--empty">
+            No page details yet.
+          </span>
+          <span class="memo-map-tile-meta">{{ tile.meta }}</span>
+          <span class="memo-map-tile-actions" @click.stop>
+            <button type="button" class="memo-map-action" :aria-label="`Edit ${tile.title}`" @click="startTileEdit(tile)" @keydown.stop>Edit page</button>
+            <button type="button" class="memo-map-action memo-map-action--danger" :aria-label="`Delete ${tile.title}`" @click="$emit('delete-page', tile.id)" @keydown.stop>Delete page</button>
+          </span>
+        </template>
       </div>
 
       <div
@@ -135,18 +160,20 @@ const props = defineProps({
   currentId: { type: String, default: '' },
 });
 
-const emit = defineEmits(['navigate', 'add-relation', 'edit-page', 'delete-page', 'edit-relation', 'delete-relation']);
+const emit = defineEmits(['navigate', 'add-relation', 'delete-page', 'update-page', 'edit-relation', 'delete-relation']);
 
 const stageEl = ref(null);
 const stageSize = reactive({ width: 0, height: 0 });
 const activeNodeId = ref('');
 const activeEdgeId = ref('');
+const editingTileId = ref('');
+const tileDraft = reactive({ title: '', bodyText: '' });
 let resizeObserver = null;
 
-const BASE_CORRIDOR_GAP = 18;
-const CORRIDOR_WIDTH_PER_ROUTE = 8;
+const BASE_CORRIDOR_GAP = 12;
+const CORRIDOR_WIDTH_PER_ROUTE = 7;
 const OUTER_PADDING = 18;
-const PERIMETER_ROUTE_LANE = 9;
+const PERIMETER_ROUTE_LANE = 12;
 const MIN_SIDE_WIDTH = 150;
 const MIN_FOCUS_WIDTH = 210;
 const MAX_VISIBLE_TILES = 28;
@@ -166,9 +193,11 @@ const TILE_FONT_SCALE = 24;
 const FOCUS_MAX_FONT_SIZE = 18;
 const TILE_MAX_FONT_SIZE = 16;
 const MIN_VERTICAL_LABEL_LENGTH = 60;
-const VERTICAL_LABEL_MIN_ASPECT_RATIO = 0.35;
 const ROUTE_EDGE_PADDING = 18;
-const SAME_GROUP_ROUTE_PADDING = 26;
+const ROUTE_CARD_CLEARANCE = 11;
+const ROUTE_CORNER_RADIUS = 9;
+const SAME_GROUP_ROUTE_PADDING = 24;
+const LANE_STEP = 10;
 
 function clamp(value, min, max) {
   return Math.min(max, Math.max(min, value));
@@ -522,7 +551,8 @@ const visibleTiles = computed(() =>
       MIN_TILE_FONT_SIZE,
       model.node.id === props.currentId ? FOCUS_MAX_FONT_SIZE : TILE_MAX_FONT_SIZE
     );
-    const bodyHtml = nodeContentStats.value.get(model.node.id)?.html || '';
+    const contentStats = nodeContentStats.value.get(model.node.id);
+    const bodyHtml = contentStats?.html || '';
     return {
       id: model.node.id,
       isFocus: model.node.id === props.currentId,
@@ -531,6 +561,7 @@ const visibleTiles = computed(() =>
       roleLabel: roleLabel(model),
       scoreLabel: model.score.toFixed(1),
       bodyHtml,
+      bodyText: contentStats?.plainText || '',
       meta: `Edited ${timeAgo(model.node.updatedAt)} · ${model.node.visits || 0} visit${model.node.visits === 1 ? '' : 's'}`,
       rect: model,
       style: {
@@ -553,36 +584,45 @@ const visibleEdges = computed(() =>
     .filter(edge => tileRects.value.has(edge.fromId) && tileRects.value.has(edge.toId))
 );
 
-function distributeOffset(index, count) {
-  return (index - (count - 1) / 2) * ENDPOINT_STEP;
+function distributeOffset(index, count, step = ENDPOINT_STEP) {
+  return (index - (count - 1) / 2) * step;
 }
 
-function edgeSideForRoute(from, to) {
-  return from.x + from.width / 2 <= to.x + to.width / 2;
-}
-
-function sideEndpoints(edge, index, count) {
-  const from = tileRects.value.get(edge.fromId);
-  const to = tileRects.value.get(edge.toId);
-  const laneOffset = distributeOffset(index, count);
-  const sourceOnLeft = edgeSideForRoute(from, to);
-  const sourceX = sourceOnLeft ? from.x + from.width : from.x;
-  const targetX = sourceOnLeft ? to.x : to.x + to.width;
+function rectCenter(rect) {
   return {
-    startX: sourceX,
-    startY: clamp(
-      from.y + from.height / 2 + laneOffset,
-      from.y + ROUTE_EDGE_PADDING,
-      from.y + from.height - ROUTE_EDGE_PADDING
-    ),
-    endX: targetX,
-    endY: clamp(
-      to.y + to.height / 2 - laneOffset,
-      to.y + ROUTE_EDGE_PADDING,
-      to.y + to.height - ROUTE_EDGE_PADDING
-    ),
-    laneOffset,
-    sourceOnLeft,
+    x: rect.x + rect.width / 2,
+    y: rect.y + rect.height / 2,
+  };
+}
+
+function oppositeSide(side) {
+  return { left: 'right', right: 'left', top: 'bottom', bottom: 'top' }[side];
+}
+
+function horizontalRouteSides(from, to) {
+  return rectCenter(from).x <= rectCenter(to).x
+    ? { startSide: 'right', endSide: 'left' }
+    : { startSide: 'left', endSide: 'right' };
+}
+
+function sameGroupRouteSides(from, to) {
+  if (from.x + from.width <= to.x) return { startSide: 'right', endSide: 'left', axis: 'x' };
+  if (to.x + to.width <= from.x) return { startSide: 'left', endSide: 'right', axis: 'x' };
+  if (from.y + from.height <= to.y) return { startSide: 'bottom', endSide: 'top', axis: 'y' };
+  if (to.y + to.height <= from.y) return { startSide: 'top', endSide: 'bottom', axis: 'y' };
+  return { ...horizontalRouteSides(from, to), axis: 'overflow' };
+}
+
+function pointOutsideRect(rect, side, offset) {
+  if (side === 'left' || side === 'right') {
+    return {
+      x: side === 'left' ? rect.x - ROUTE_CARD_CLEARANCE : rect.x + rect.width + ROUTE_CARD_CLEARANCE,
+      y: clamp(rectCenter(rect).y + offset, rect.y + ROUTE_EDGE_PADDING, rect.y + rect.height - ROUTE_EDGE_PADDING),
+    };
+  }
+  return {
+    x: clamp(rectCenter(rect).x + offset, rect.x + ROUTE_EDGE_PADDING, rect.x + rect.width - ROUTE_EDGE_PADDING),
+    y: side === 'top' ? rect.y - ROUTE_CARD_CLEARANCE : rect.y + rect.height + ROUTE_CARD_CLEARANCE,
   };
 }
 
@@ -592,6 +632,7 @@ function adjacentCorridorBetween(from, to) {
 }
 
 function laneXInCorridor(corridor, laneOffset) {
+  if (!corridor) return null;
   const center = corridor.x + corridor.width / 2;
   return clamp(
     center + laneOffset,
@@ -600,18 +641,42 @@ function laneXInCorridor(corridor, laneOffset) {
   );
 }
 
-function defaultMidX(endpoints) {
-  return (endpoints.startX + endpoints.endX) / 2;
+function corridorIndexesBetween(from, to) {
+  const start = Math.min(from.groupIndex, to.groupIndex);
+  const end = Math.max(from.groupIndex, to.groupIndex);
+  const indexes = [];
+  for (let index = start; index < end; index++) indexes.push(index);
+  return indexes;
 }
 
-function directRoutePath(points) {
-  // Orthogonal route: move to source, cross the conduit horizontally, run vertically, then enter the target horizontally.
-  return `M ${points.startX} ${points.startY} H ${points.midX} V ${points.endY} H ${points.endX}`;
-}
-
-function perimeterRoutePath(points) {
-  const perimeterY = points.startY <= points.endY ? PERIMETER_ROUTE_LANE : stageSize.height - PERIMETER_ROUTE_LANE;
-  return `M ${points.startX} ${points.startY} H ${points.startMidX} V ${perimeterY} H ${points.endMidX} V ${points.endY} H ${points.endX}`;
+function roundedOrthogonalPath(points) {
+  if (points.length < 2) return '';
+  const commands = [`M ${points[0].x} ${points[0].y}`];
+  for (let i = 1; i < points.length - 1; i++) {
+    const prev = points[i - 1];
+    const current = points[i];
+    const next = points[i + 1];
+    const incoming = Math.abs(current.x - prev.x) + Math.abs(current.y - prev.y);
+    const outgoing = Math.abs(next.x - current.x) + Math.abs(next.y - current.y);
+    const radius = Math.min(ROUTE_CORNER_RADIUS, incoming / 2, outgoing / 2);
+    if (radius <= 0) {
+      commands.push(`L ${current.x} ${current.y}`);
+      continue;
+    }
+    const before = {
+      x: current.x + Math.sign(prev.x - current.x) * radius,
+      y: current.y + Math.sign(prev.y - current.y) * radius,
+    };
+    const after = {
+      x: current.x + Math.sign(next.x - current.x) * radius,
+      y: current.y + Math.sign(next.y - current.y) * radius,
+    };
+    commands.push(`L ${before.x} ${before.y}`);
+    commands.push(`Q ${current.x} ${current.y} ${after.x} ${after.y}`);
+  }
+  const last = points[points.length - 1];
+  commands.push(`L ${last.x} ${last.y}`);
+  return commands.join(' ');
 }
 
 function labelRotation(vertical, startY, endY) {
@@ -620,90 +685,170 @@ function labelRotation(vertical, startY, endY) {
 }
 
 const routedEdges = computed(() => {
-  const counts = new Map();
-  const indexes = new Map();
-  for (const edge of visibleEdges.value) {
-    const key = `${edge.fromId}->${edge.toId}`;
-    counts.set(key, (counts.get(key) || 0) + 1);
-    indexes.set(edge.id, counts.get(key) - 1);
-  }
-
-  return visibleEdges.value.map(edge => {
-    const key = `${edge.fromId}->${edge.toId}`;
+  const plans = visibleEdges.value.map(edge => {
     const from = tileRects.value.get(edge.fromId);
     const to = tileRects.value.get(edge.toId);
-    const endpoints = sideEndpoints(edge, indexes.get(edge.id), counts.get(key));
-    let points;
-    let path;
-    let labelSegment = 'vertical';
     const groupDistance = Math.abs(from.groupIndex - to.groupIndex);
+    const sides = groupDistance === 0 ? sameGroupRouteSides(from, to) : horizontalRouteSides(from, to);
+    return { edge, from, to, groupDistance, ...sides };
+  });
+
+  const endpointOffsets = new Map();
+  const endpointGroups = new Map();
+  for (const plan of plans) {
+    const fromCenter = rectCenter(plan.from);
+    const toCenter = rectCenter(plan.to);
+    const endpoints = [
+      { id: plan.edge.id, key: `${plan.edge.fromId}:${plan.startSide}`, endpoint: 'start', sort: plan.startSide === 'top' || plan.startSide === 'bottom' ? toCenter.x : toCenter.y },
+      { id: plan.edge.id, key: `${plan.edge.toId}:${plan.endSide}`, endpoint: 'end', sort: plan.endSide === 'top' || plan.endSide === 'bottom' ? fromCenter.x : fromCenter.y },
+    ];
+    for (const endpoint of endpoints) {
+      if (!endpointGroups.has(endpoint.key)) endpointGroups.set(endpoint.key, []);
+      endpointGroups.get(endpoint.key).push(endpoint);
+    }
+  }
+  for (const endpoints of endpointGroups.values()) {
+    endpoints
+      .sort((a, b) => a.sort - b.sort || a.id.localeCompare(b.id))
+      .forEach((endpoint, index) => {
+        endpointOffsets.set(`${endpoint.id}:${endpoint.endpoint}`, distributeOffset(index, endpoints.length));
+      });
+  }
+
+  const corridorLaneOffsets = new Map();
+  const corridorLaneGroups = new Map();
+  for (const plan of plans) {
+    for (const corridorIndex of corridorIndexesBetween(plan.from, plan.to)) {
+      if (!corridorLaneGroups.has(corridorIndex)) corridorLaneGroups.set(corridorIndex, []);
+      corridorLaneGroups.get(corridorIndex).push({
+        id: plan.edge.id,
+        sort: (rectCenter(plan.from).y + rectCenter(plan.to).y) / 2,
+      });
+    }
+  }
+  for (const [corridorIndex, routes] of corridorLaneGroups) {
+    routes
+      .sort((a, b) => a.sort - b.sort || a.id.localeCompare(b.id))
+      .forEach((route, index) => {
+        corridorLaneOffsets.set(`${route.id}:${corridorIndex}`, distributeOffset(index, routes.length, LANE_STEP));
+      });
+  }
+
+  return plans.map(plan => {
+    const { edge, from, to, groupDistance } = plan;
+    const start = pointOutsideRect(from, plan.startSide, endpointOffsets.get(`${edge.id}:start`) || 0);
+    const end = pointOutsideRect(to, plan.endSide, endpointOffsets.get(`${edge.id}:end`) || 0);
+    let points = [];
     if (groupDistance === 1) {
       const corridor = adjacentCorridorBetween(from, to);
-      const midX = corridor
-        ? laneXInCorridor(corridor, endpoints.laneOffset)
-        : defaultMidX(endpoints);
-      points = { ...endpoints, midX };
-      path = directRoutePath(points);
+      const laneOffset = corridorLaneOffsets.get(`${edge.id}:${Math.min(from.groupIndex, to.groupIndex)}`) || 0;
+      const midX = laneXInCorridor(corridor, laneOffset) ?? (start.x + end.x) / 2;
+      points = [start, { x: midX, y: start.y }, { x: midX, y: end.y }, end];
     } else if (groupDistance > 1) {
-      const startCorridor = routeCorridors.value[Math.min(from.groupIndex, to.groupIndex)] || null;
-      const endCorridor = routeCorridors.value[Math.max(from.groupIndex, to.groupIndex) - 1] || null;
-      points = {
-        ...endpoints,
-        startMidX: startCorridor ? laneXInCorridor(startCorridor, endpoints.laneOffset) : endpoints.startX,
-        endMidX: endCorridor ? laneXInCorridor(endCorridor, endpoints.laneOffset) : endpoints.endX,
-      };
-      path = perimeterRoutePath(points);
-      labelSegment = 'perimeter';
+      const corridorIndexes = corridorIndexesBetween(from, to);
+      const firstCorridorIndex = corridorIndexes[0];
+      const lastCorridorIndex = corridorIndexes[corridorIndexes.length - 1];
+      const firstCorridor = routeCorridors.value[firstCorridorIndex] || null;
+      const lastCorridor = routeCorridors.value[lastCorridorIndex] || null;
+      const firstLane = corridorLaneOffsets.get(`${edge.id}:${firstCorridorIndex}`) || 0;
+      const lastLane = corridorLaneOffsets.get(`${edge.id}:${lastCorridorIndex}`) || firstLane;
+      const startMidX = laneXInCorridor(firstCorridor, firstLane) ?? start.x;
+      const endMidX = laneXInCorridor(lastCorridor, lastLane) ?? end.x;
+      const perimeterY = (start.y + end.y) / 2 < stageSize.height / 2
+        ? PERIMETER_ROUTE_LANE
+        : stageSize.height - PERIMETER_ROUTE_LANE;
+      points = [
+        start,
+        { x: startMidX, y: start.y },
+        { x: startMidX, y: perimeterY },
+        { x: endMidX, y: perimeterY },
+        { x: endMidX, y: end.y },
+        end,
+      ];
+    } else if (plan.axis === 'y') {
+      const top = plan.startSide === 'bottom' ? from.y + from.height : to.y + to.height;
+      const bottom = plan.startSide === 'bottom' ? to.y : from.y;
+      const laneOffset = (endpointOffsets.get(`${edge.id}:start`) || 0) * 0.45;
+      const midY = (top + bottom) / 2 + laneOffset;
+      points = [start, { x: start.x, y: midY }, { x: end.x, y: midY }, end];
+    } else if (plan.axis === 'x') {
+      const left = plan.startSide === 'right' ? from.x + from.width : to.x + to.width;
+      const right = plan.startSide === 'right' ? to.x : from.x;
+      const laneOffset = (endpointOffsets.get(`${edge.id}:start`) || 0) * 0.45;
+      const midX = (left + right) / 2 + laneOffset;
+      points = [start, { x: midX, y: start.y }, { x: midX, y: end.y }, end];
     } else {
-      const routeOnRight = endpoints.sourceOnLeft;
+      const routeOnRight = plan.startSide === 'right';
       const rawMidX = routeOnRight
-        ? Math.max(from.x + from.width, to.x + to.width) + SAME_GROUP_ROUTE_PADDING + Math.abs(endpoints.laneOffset)
-        : Math.min(from.x, to.x) - SAME_GROUP_ROUTE_PADDING - Math.abs(endpoints.laneOffset);
-      const midX = clamp(rawMidX, ROUTE_EDGE_PADDING, stageSize.width - ROUTE_EDGE_PADDING);
-      points = { ...endpoints, midX };
-      path = directRoutePath(points);
+        ? Math.max(from.x + from.width, to.x + to.width) + SAME_GROUP_ROUTE_PADDING
+        : Math.min(from.x, to.x) - SAME_GROUP_ROUTE_PADDING;
+      const laneOffset = endpointOffsets.get(`${edge.id}:start`) || 0;
+      const midX = clamp(rawMidX + (routeOnRight ? laneOffset : -laneOffset), ROUTE_EDGE_PADDING, stageSize.width - ROUTE_EDGE_PADDING);
+      points = [start, { x: midX, y: start.y }, { x: midX, y: end.y }, end];
     }
+
     return {
       id: edge.id,
       edge,
       fromId: edge.fromId,
       toId: edge.toId,
-      ...points,
-      path,
+      points,
+      startX: start.x,
+      startY: start.y,
+      endX: end.x,
+      endY: end.y,
+      path: roundedOrthogonalPath(points),
       label: relationLabel(edge),
       bodyHtml: relationBodyHtml(edge),
-      labelSegment,
       touchesFocus: edge.fromId === props.currentId || edge.toId === props.currentId,
       strokeWidth: 1.1 + Math.min(1.8, (edge.weight || DEFAULT_EDGE_WEIGHT) / 8),
     };
   });
 });
 
+function routeLabelPlacement(route) {
+  const segments = [];
+  for (let index = 1; index < route.points.length; index++) {
+    const start = route.points[index - 1];
+    const end = route.points[index];
+    const horizontal = start.y === end.y;
+    const vertical = start.x === end.x;
+    if (!horizontal && !vertical) continue;
+    segments.push({
+      start,
+      end,
+      vertical,
+      length: horizontal ? Math.abs(end.x - start.x) : Math.abs(end.y - start.y),
+    });
+  }
+  const horizontal = segments
+    .filter(segment => !segment.vertical && segment.length >= 42)
+    .sort((a, b) => b.length - a.length)[0];
+  const segment = horizontal || segments.sort((a, b) => b.length - a.length)[0];
+  if (!segment) return { x: route.endX, y: route.endY - 12, vertical: false, rotation: 0 };
+  const vertical = !horizontal && segment.vertical && segment.length >= MIN_VERTICAL_LABEL_LENGTH;
+  return {
+    x: (segment.start.x + segment.end.x) / 2,
+    y: (segment.start.y + segment.end.y) / 2,
+    vertical,
+    rotation: labelRotation(vertical, segment.start.y, segment.end.y),
+  };
+}
+
 const routeLabels = computed(() =>
   routedEdges.value.map(route => {
-    const verticalLength = Math.abs(route.endY - route.startY);
-    const horizontalLength = Math.abs(route.endX - route.startX);
-    const vertical = route.labelSegment === 'vertical'
-      && verticalLength > MIN_VERTICAL_LABEL_LENGTH
-      && verticalLength > horizontalLength * VERTICAL_LABEL_MIN_ASPECT_RATIO;
-    const rotation = labelRotation(vertical, route.startY, route.endY);
-    const x = route.labelSegment === 'perimeter'
-      ? (route.startMidX + route.endMidX) / 2
-      : (vertical ? route.midX : (route.startX + route.endX) / 2);
-    const y = route.labelSegment === 'perimeter'
-      ? (route.startY <= route.endY ? PERIMETER_ROUTE_LANE + 12 : stageSize.height - PERIMETER_ROUTE_LANE - 12)
-      : (vertical ? (route.startY + route.endY) / 2 : route.endY - 12);
+    const placement = routeLabelPlacement(route);
     return {
       id: route.id,
       label: route.label,
       bodyHtml: route.bodyHtml,
       route,
       edge: route.edge,
-      vertical,
+      vertical: placement.vertical,
       style: {
-        left: `${x}px`,
-        top: `${y}px`,
-        '--memo-label-rotation': `${rotation}deg`,
+        left: `${placement.x}px`,
+        top: `${placement.y}px`,
+        '--memo-label-rotation': `${placement.rotation}deg`,
       },
     };
   })
@@ -716,6 +861,28 @@ function handleTileClick(tile) {
 function handleTileKeydown(event, tile) {
   if (event.target !== event.currentTarget) return;
   handleTileClick(tile);
+}
+
+function startTileEdit(tile) {
+  editingTileId.value = tile.id;
+  tileDraft.title = tile.title;
+  tileDraft.bodyText = tile.bodyText;
+}
+
+function cancelTileEdit() {
+  editingTileId.value = '';
+  tileDraft.title = '';
+  tileDraft.bodyText = '';
+}
+
+function saveTileEdit() {
+  if (!editingTileId.value) return;
+  emit('update-page', {
+    id: editingTileId.value,
+    title: tileDraft.title,
+    bodyText: tileDraft.bodyText,
+  });
+  cancelTileEdit();
 }
 
 function activateNode(nodeId) {

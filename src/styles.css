@@ -914,6 +914,52 @@ body {
   font-style: italic;
 }
 
+.memo-map-tile-editor {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.memo-map-tile-title-input,
+.memo-map-tile-body-input {
+  width: 100%;
+  border: 1px solid rgba(129,140,248,.3);
+  border-radius: 8px;
+  background: rgba(13,15,26,.58);
+  color: var(--text);
+  font: inherit;
+  outline: none;
+}
+
+.memo-map-tile-title-input {
+  padding: 6px 8px;
+  font-weight: 800;
+}
+
+.memo-map-tile-body-input {
+  flex: 1;
+  min-height: 56px;
+  resize: none;
+  padding: 8px;
+  color: var(--muted);
+  font-size: .78em;
+  line-height: 1.42;
+}
+
+.memo-map-tile-title-input:focus,
+.memo-map-tile-body-input:focus {
+  border-color: rgba(165,180,252,.86);
+  box-shadow: 0 0 0 3px rgba(129,140,248,.12);
+}
+
+.memo-map-tile-editor-actions {
+  display: flex;
+  gap: 6px;
+  justify-content: flex-end;
+}
+
 .memo-map-tile-meta {
   display: block;
   color: var(--dim);
