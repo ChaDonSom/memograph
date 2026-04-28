@@ -240,6 +240,7 @@ const LABEL_DEFAULT_OFFSET = 12;
 const ROUTE_HIT_PADDING = 10;
 const ROUTE_OBSTACLE_EPSILON = 0.01;
 const ROUTE_TURN_PENALTY = 14;
+const ROUTE_COORDINATE_PRECISION = 100;
 
 function clamp(value, min, max) {
   return Math.min(max, Math.max(min, value));
@@ -741,7 +742,7 @@ function inflateRect(rect, amount) {
   };
 }
 
-function pointInRect(point, rect) {
+function pointInRectInterior(point, rect) {
   return point.x > rect.x + ROUTE_OBSTACLE_EPSILON
     && point.x < rect.x + rect.width - ROUTE_OBSTACLE_EPSILON
     && point.y > rect.y + ROUTE_OBSTACLE_EPSILON
@@ -764,7 +765,7 @@ function segmentIntersectsRect(start, end, rect) {
       && start.y < rect.y + rect.height - ROUTE_OBSTACLE_EPSILON
       && rangesOverlap(start.x, end.x, rect.x, rect.x + rect.width);
   }
-  return true;
+  return false;
 }
 
 function routeObstacleRects() {
@@ -784,14 +785,14 @@ function routeIsClear(points, obstacles) {
 
 function uniqueSortedLines(values, min, max) {
   return [...new Set(values
-    .map(value => Math.round(clamp(value, min, max) * 100) / 100))]
+    .map(value => Math.round(clamp(value, min, max) * ROUTE_COORDINATE_PRECISION) / ROUTE_COORDINATE_PRECISION))]
     .sort((a, b) => a - b);
 }
 
 function routePoint(point) {
   return {
-    x: Math.round(point.x * 100) / 100,
-    y: Math.round(point.y * 100) / 100,
+    x: Math.round(point.x * ROUTE_COORDINATE_PRECISION) / ROUTE_COORDINATE_PRECISION,
+    y: Math.round(point.y * ROUTE_COORDINATE_PRECISION) / ROUTE_COORDINATE_PRECISION,
   };
 }
 
@@ -844,9 +845,14 @@ function compactOrthogonalPoints(points) {
 }
 
 function enqueueRouteState(queue, entry) {
-  const index = queue.findIndex(item => item.cost > entry.cost);
-  if (index === -1) queue.push(entry);
-  else queue.splice(index, 0, entry);
+  let low = 0;
+  let high = queue.length;
+  while (low < high) {
+    const mid = Math.floor((low + high) / 2);
+    if (queue[mid].cost <= entry.cost) low = mid + 1;
+    else high = mid;
+  }
+  queue.splice(low, 0, entry);
 }
 
 function findClearOrthogonalRoute(points) {
@@ -865,7 +871,7 @@ function findClearOrthogonalRoute(points) {
   const nodeAllowed = (x, y) => {
     const point = { x, y };
     if ((x === start.x && y === start.y) || (x === end.x && y === end.y)) return true;
-    return !obstacles.some(rect => pointInRect(point, rect));
+    return !obstacles.some(rect => pointInRectInterior(point, rect));
   };
   const distances = new Map();
   const previous = new Map();
