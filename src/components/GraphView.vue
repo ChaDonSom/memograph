@@ -903,7 +903,8 @@ function findClearOrthogonalRoute(points) {
   const distances = new Map();
   const previous = new Map();
   const queue = [];
-  // Search states are encoded as "x,y|previousAxis" so turn penalties can distinguish approaches to the same point.
+  // Search states are encoded as "x,y|previousAxis" where previousAxis is "none", "x", or "y".
+  // Keeping the axis in the state lets turn penalties distinguish approaches to the same point.
   const startState = `${nodeKey(start.x, start.y)}|none`;
   distances.set(startState, 0);
   enqueueRouteState(queue, { state: startState, cost: 0 });
@@ -939,7 +940,8 @@ function findClearOrthogonalRoute(points) {
       const turnCost = previousAxis !== 'none' && previousAxis !== neighbor.axis ? ROUTE_TURN_PENALTY : 0;
       const nextCost = cost + Math.abs(next.x - current.x) + Math.abs(next.y - current.y) + turnCost;
       const nextState = `${nodeKey(next.x, next.y)}|${neighbor.axis}`;
-      if (nextCost >= (distances.get(nextState) ?? Number.POSITIVE_INFINITY)) continue;
+      const existingCost = distances.get(nextState);
+      if (existingCost !== undefined && nextCost >= existingCost) continue;
       distances.set(nextState, nextCost);
       previous.set(nextState, state);
       enqueueRouteState(queue, { state: nextState, cost: nextCost });
