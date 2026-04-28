@@ -696,6 +696,12 @@ function createVerticalBendPoints(start, end, midX) {
   return [start, { x: midX, y: start.y }, { x: midX, y: end.y }, end];
 }
 
+function perimeterLaneY(start, end) {
+  const topCost = start.y + end.y;
+  const bottomCost = (stageSize.height - start.y) + (stageSize.height - end.y);
+  return topCost <= bottomCost ? PERIMETER_ROUTE_LANE : stageSize.height - PERIMETER_ROUTE_LANE;
+}
+
 function labelRotation(vertical, startY, endY) {
   if (!vertical) return 0;
   return endY < startY ? -90 : 90;
@@ -771,9 +777,7 @@ const routedEdges = computed(() => {
       const lastLane = corridorLaneOffsets.get(`${edge.id}:${lastCorridorIndex}`) || firstLane;
       const startMidX = laneXInCorridor(firstCorridor, firstLane) ?? start.x;
       const endMidX = laneXInCorridor(lastCorridor, lastLane) ?? end.x;
-      const perimeterY = (start.y + end.y) / 2 < stageSize.height / 2
-        ? PERIMETER_ROUTE_LANE
-        : stageSize.height - PERIMETER_ROUTE_LANE;
+      const perimeterY = perimeterLaneY(start, end);
       points = [
         start,
         { x: startMidX, y: start.y },
@@ -845,7 +849,14 @@ function routeLabelPlacement(route) {
     .filter(segment => !segment.vertical && segment.length >= 42)
     .sort((a, b) => b.length - a.length)[0];
   const segment = horizontal || segments.sort((a, b) => b.length - a.length)[0];
-  if (!segment) return { x: route.endX, y: route.endY - LABEL_DEFAULT_OFFSET, vertical: false, rotation: 0 };
+  if (!segment) {
+    return {
+      x: (route.startX + route.endX) / 2,
+      y: (route.startY + route.endY) / 2 - LABEL_DEFAULT_OFFSET,
+      vertical: false,
+      rotation: 0,
+    };
+  }
   const vertical = !horizontal && segment.vertical && segment.length >= MIN_VERTICAL_LABEL_LENGTH;
   return {
     x: (segment.start.x + segment.end.x) / 2,

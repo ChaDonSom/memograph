@@ -1643,6 +1643,7 @@ function deletePageFromGraph(id) {
 
 /**
  * Converts graph-card plain text edits into sanitized editor HTML.
+ * Blank-line breaks become paragraphs; single line breaks stay inside the paragraph as <br>.
  */
 function graphBodyHtmlFromText(bodyText) {
   const normalized = normalizeNewlines(bodyText).trim();
