@@ -56,6 +56,16 @@
         </defs>
         <path
           v-for="route in routedEdges"
+          :key="`${route.id}-hit`"
+          class="memo-map-route-hit"
+          :d="route.path"
+          :style="{ strokeWidth: route.hitStrokeWidth }"
+          mask="url(#memo-map-route-card-mask)"
+          @mouseenter="activateRoute(route)"
+          @mouseleave="clearHighlight"
+        />
+        <path
+          v-for="route in routedEdges"
           :key="route.id"
           class="memo-map-route"
           :class="{
@@ -227,6 +237,9 @@ const SAME_GROUP_ROUTE_PADDING = 24;
 const SAME_GROUP_LANE_FACTOR = 0.45;
 const LANE_STEP = 10;
 const LABEL_DEFAULT_OFFSET = 12;
+const ROUTE_HIT_PADDING = 10;
+const ROUTE_OBSTACLE_EPSILON = 0.01;
+const ROUTE_TURN_PENALTY = 14;
 
 function clamp(value, min, max) {
   return Math.min(max, Math.max(min, value));
@@ -719,6 +732,184 @@ function createVerticalBendPoints(start, end, midX) {
   return [start, { x: midX, y: start.y }, { x: midX, y: end.y }, end];
 }
 
+function inflateRect(rect, amount) {
+  return {
+    x: rect.x - amount,
+    y: rect.y - amount,
+    width: rect.width + amount * 2,
+    height: rect.height + amount * 2,
+  };
+}
+
+function pointInRect(point, rect) {
+  return point.x > rect.x + ROUTE_OBSTACLE_EPSILON
+    && point.x < rect.x + rect.width - ROUTE_OBSTACLE_EPSILON
+    && point.y > rect.y + ROUTE_OBSTACLE_EPSILON
+    && point.y < rect.y + rect.height - ROUTE_OBSTACLE_EPSILON;
+}
+
+function rangesOverlap(startA, endA, startB, endB) {
+  return Math.max(Math.min(startA, endA), Math.min(startB, endB)) + ROUTE_OBSTACLE_EPSILON
+    < Math.min(Math.max(startA, endA), Math.max(startB, endB));
+}
+
+function segmentIntersectsRect(start, end, rect) {
+  if (start.x === end.x) {
+    return start.x > rect.x + ROUTE_OBSTACLE_EPSILON
+      && start.x < rect.x + rect.width - ROUTE_OBSTACLE_EPSILON
+      && rangesOverlap(start.y, end.y, rect.y, rect.y + rect.height);
+  }
+  if (start.y === end.y) {
+    return start.y > rect.y + ROUTE_OBSTACLE_EPSILON
+      && start.y < rect.y + rect.height - ROUTE_OBSTACLE_EPSILON
+      && rangesOverlap(start.x, end.x, rect.x, rect.x + rect.width);
+  }
+  return true;
+}
+
+function routeObstacleRects() {
+  return visibleTiles.value.map(tile => inflateRect(tile.rect, ROUTE_MASK_CARD_BLEED));
+}
+
+function segmentBlocked(start, end, obstacles) {
+  return obstacles.some(rect => segmentIntersectsRect(start, end, rect));
+}
+
+function routeIsClear(points, obstacles) {
+  for (let index = 1; index < points.length; index++) {
+    if (segmentBlocked(points[index - 1], points[index], obstacles)) return false;
+  }
+  return true;
+}
+
+function uniqueSortedLines(values, min, max) {
+  return [...new Set(values
+    .map(value => Math.round(clamp(value, min, max) * 100) / 100))]
+    .sort((a, b) => a - b);
+}
+
+function routePoint(point) {
+  return {
+    x: Math.round(point.x * 100) / 100,
+    y: Math.round(point.y * 100) / 100,
+  };
+}
+
+function routeGridLines(start, end, preferredPoints, obstacles) {
+  const xLines = [
+    ROUTE_EDGE_PADDING,
+    stageSize.width - ROUTE_EDGE_PADDING,
+    start.x,
+    end.x,
+    ...preferredPoints.map(point => point.x),
+  ];
+  const yLines = [
+    PERIMETER_ROUTE_LANE,
+    stageSize.height - PERIMETER_ROUTE_LANE,
+    start.y,
+    end.y,
+    ...preferredPoints.map(point => point.y),
+  ];
+  for (const rect of obstacles) {
+    xLines.push(rect.x - ROUTE_CARD_CLEARANCE, rect.x + rect.width + ROUTE_CARD_CLEARANCE);
+    yLines.push(rect.y - ROUTE_CARD_CLEARANCE, rect.y + rect.height + ROUTE_CARD_CLEARANCE);
+  }
+  for (const corridor of routeCorridors.value) {
+    if (!corridor) continue;
+    xLines.push(
+      corridor.x + ROUTE_EDGE_PADDING / 2,
+      corridor.x + corridor.width / 2,
+      corridor.x + corridor.width - ROUTE_EDGE_PADDING / 2
+    );
+  }
+  return {
+    xLines: uniqueSortedLines(xLines, ROUTE_EDGE_PADDING, stageSize.width - ROUTE_EDGE_PADDING),
+    yLines: uniqueSortedLines(yLines, PERIMETER_ROUTE_LANE, stageSize.height - PERIMETER_ROUTE_LANE),
+  };
+}
+
+function compactOrthogonalPoints(points) {
+  if (points.length <= 2) return points;
+  const compacted = [points[0]];
+  for (let index = 1; index < points.length - 1; index++) {
+    const previous = compacted[compacted.length - 1];
+    const current = points[index];
+    const next = points[index + 1];
+    if ((previous.x === current.x && current.x === next.x)
+      || (previous.y === current.y && current.y === next.y)) continue;
+    compacted.push(current);
+  }
+  compacted.push(points[points.length - 1]);
+  return compacted;
+}
+
+function findClearOrthogonalRoute(points) {
+  points = points.map(routePoint);
+  const obstacles = routeObstacleRects();
+  if (routeIsClear(points, obstacles)) return compactOrthogonalPoints(points);
+
+  const start = points[0];
+  const end = points[points.length - 1];
+  const { xLines, yLines } = routeGridLines(start, end, points, obstacles);
+  const nodeKey = (x, y) => `${x},${y}`;
+  const parseKey = key => {
+    const [x, y] = key.split(',').map(Number);
+    return { x, y };
+  };
+  const nodeAllowed = (x, y) => {
+    const point = { x, y };
+    if ((x === start.x && y === start.y) || (x === end.x && y === end.y)) return true;
+    return !obstacles.some(rect => pointInRect(point, rect));
+  };
+  const distances = new Map();
+  const previous = new Map();
+  const queue = [];
+  const startState = `${nodeKey(start.x, start.y)}|none`;
+  distances.set(startState, 0);
+  queue.push({ state: startState, cost: 0 });
+
+  while (queue.length) {
+    queue.sort((a, b) => a.cost - b.cost);
+    const { state, cost } = queue.shift();
+    if (cost !== distances.get(state)) continue;
+    const [key, previousAxis] = state.split('|');
+    const current = parseKey(key);
+    if (current.x === end.x && current.y === end.y) {
+      const route = [];
+      let cursor = state;
+      while (cursor) {
+        route.push(parseKey(cursor.split('|')[0]));
+        cursor = previous.get(cursor);
+      }
+      return compactOrthogonalPoints(route.reverse());
+    }
+
+    const xIndex = xLines.indexOf(current.x);
+    const yIndex = yLines.indexOf(current.y);
+    const neighbors = [
+      xIndex > 0 ? { x: xLines[xIndex - 1], y: current.y, axis: 'x' } : null,
+      xIndex < xLines.length - 1 ? { x: xLines[xIndex + 1], y: current.y, axis: 'x' } : null,
+      yIndex > 0 ? { x: current.x, y: yLines[yIndex - 1], axis: 'y' } : null,
+      yIndex < yLines.length - 1 ? { x: current.x, y: yLines[yIndex + 1], axis: 'y' } : null,
+    ].filter(Boolean);
+
+    for (const neighbor of neighbors) {
+      if (!nodeAllowed(neighbor.x, neighbor.y)) continue;
+      const next = { x: neighbor.x, y: neighbor.y };
+      if (segmentBlocked(current, next, obstacles)) continue;
+      const turnCost = previousAxis !== 'none' && previousAxis !== neighbor.axis ? ROUTE_TURN_PENALTY : 0;
+      const nextCost = cost + Math.abs(next.x - current.x) + Math.abs(next.y - current.y) + turnCost;
+      const nextState = `${nodeKey(next.x, next.y)}|${neighbor.axis}`;
+      if (nextCost >= (distances.get(nextState) ?? Number.POSITIVE_INFINITY)) continue;
+      distances.set(nextState, nextCost);
+      previous.set(nextState, state);
+      queue.push({ state: nextState, cost: nextCost });
+    }
+  }
+
+  return compactOrthogonalPoints(points);
+}
+
 function perimeterLaneY(start, end) {
   const topCost = start.y + end.y;
   const bottomCost = (stageSize.height - start.y) + (stageSize.height - end.y);
@@ -831,6 +1022,8 @@ const routedEdges = computed(() => {
       points = createVerticalBendPoints(start, end, midX);
     }
 
+    points = findClearOrthogonalRoute(points);
+    const strokeWidth = 1.1 + Math.min(1.8, (edge.weight || DEFAULT_EDGE_WEIGHT) / 8);
     return {
       id: edge.id,
       edge,
@@ -845,7 +1038,8 @@ const routedEdges = computed(() => {
       label: relationLabel(edge),
       bodyHtml: relationBodyHtml(edge),
       touchesFocus: edge.fromId === props.currentId || edge.toId === props.currentId,
-      strokeWidth: 1.1 + Math.min(1.8, (edge.weight || DEFAULT_EDGE_WEIGHT) / 8),
+      strokeWidth,
+      hitStrokeWidth: strokeWidth + ROUTE_HIT_PADDING,
     };
   });
 });

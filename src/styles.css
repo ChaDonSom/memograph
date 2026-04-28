@@ -809,6 +809,14 @@ body {
   transition: d 260ms ease, stroke .16s ease, stroke-width .16s ease;
 }
 
+.memo-map-route-hit {
+  fill: none;
+  stroke: transparent;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  pointer-events: stroke;
+}
+
 .memo-map-route--focused {
   stroke: rgba(165,180,252,.82);
 }
