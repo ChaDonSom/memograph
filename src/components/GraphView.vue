@@ -275,7 +275,7 @@ const ARROWHEAD_ENDPOINT_GAP = 2;
 const ARROWHEAD_COLLISION_STEP = 14;
 const ARROWHEAD_LABEL_RADIUS = 28;
 const ARROWHEAD_PLACEMENT_MAX_ATTEMPTS = 6;
-const ARROWHEAD_ENDPOINT_QUANTIZATION_GRID = 4;
+const ARROWHEAD_SNAP_GRID = 4;
 const MIN_SEGMENT_LENGTH = 1;
 const ROUTE_OBSTACLE_EPSILON = 0.01;
 const ROUTE_TURN_PENALTY = 14;
@@ -1332,6 +1332,7 @@ function pointBackAlongRoute(points, distanceFromEnd) {
 
   const start = points[0];
   const end = points[points.length - 1];
+  // Degenerate routes can collapse to one point while layout is resizing; keep direction math finite.
   const length = Math.max(MIN_SEGMENT_LENGTH, distanceBetweenPoints(start, end));
   return {
     x: end.x,
@@ -1364,7 +1365,7 @@ function arrowheadPolygon(point, unit) {
 }
 
 function quantizeArrowheadEndpoint(value) {
-  return Math.round(value / ARROWHEAD_ENDPOINT_QUANTIZATION_GRID) * ARROWHEAD_ENDPOINT_QUANTIZATION_GRID;
+  return Math.round(value / ARROWHEAD_SNAP_GRID) * ARROWHEAD_SNAP_GRID;
 }
 
 const routeArrowheads = computed(() => {
@@ -1458,7 +1459,7 @@ function restoreEditorContents(quill, serializedDelta) {
     quill.setContents(sanitizeRichDelta(parsed));
     return true;
   } catch (error) {
-    console.warn('Unable to restore graph tile editor contents; falling back to saved HTML/plain text.', error);
+    console.warn('Unable to restore graph tile editor contents from Delta; will attempt to load from HTML or plain text fallback.', error);
     return false;
   }
 }
@@ -1468,16 +1469,23 @@ function initTileEditor() {
   tileEditorHost.replaceChildren();
   const editorEl = document.createElement('div');
   tileEditorHost.appendChild(editorEl);
-  tileEditor = new Quill(editorEl, {
-    theme: 'snow',
-    placeholder: 'Write something about this page…',
-    modules: {
-      toolbar: RICH_CONTENT_TOOLBAR,
-      uploader: {
-        handler: imageUploadHandler,
+  try {
+    tileEditor = new Quill(editorEl, {
+      theme: 'snow',
+      placeholder: 'Write something about this page…',
+      modules: {
+        toolbar: RICH_CONTENT_TOOLBAR,
+        uploader: {
+          handler: imageUploadHandler,
+        },
       },
-    },
-  });
+    });
+  } catch (error) {
+    tileEditor = null;
+    tileEditorHost.textContent = 'Unable to initialize the rich editor. Cancel and try again.';
+    console.warn('Unable to initialize graph tile rich editor.', error);
+    return;
+  }
   const deltaRestored = tileDraft.bodyDelta && restoreEditorContents(tileEditor, tileDraft.bodyDelta);
   if (!deltaRestored && tileDraft.bodyHtml) {
     tileEditor.clipboard.dangerouslyPasteHTML(sanitizeRichHtml(normalizeEditorHtml(tileDraft.bodyHtml)));

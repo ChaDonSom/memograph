@@ -1661,7 +1661,7 @@ function updatePageFromGraph({ id, title, bodyDelta, bodyHtml }) {
     try {
       pageDelta = sanitizeRichDelta(JSON.parse(bodyDelta));
     } catch (error) {
-      console.warn('Unable to save graph editor Delta; resetting the Delta while preserving sanitized HTML.', error);
+      console.warn('Unable to parse graph editor Delta; saving sanitized HTML content only. Some formatting may be lost when reopening the editor.', error);
     }
   }
   node.title = (title ?? '').trim();
