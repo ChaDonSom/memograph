@@ -207,7 +207,7 @@ const MAP_MAX_COLUMNS = 7;
 const MAP_MIN_ROWS = 5;
 const MAP_MAX_ROWS = 7;
 const FOCUS_ZONE_RADIUS = 1;
-const FOCUS_RESERVED_CELL_COUNT = Math.pow(FOCUS_ZONE_RADIUS * 2 + 1, 2) - 1;
+const FOCUS_RESERVED_CELL_COUNT = Math.pow(FOCUS_ZONE_RADIUS * 2 + 1, 2);
 const MAP_MAX_HOP_RING = Math.floor(Math.max(MAP_MAX_ROWS, MAP_MAX_COLUMNS) / 2);
 const ANGLE_SPREAD_BINS = 5;
 const ANGLE_SPREAD_CENTER = 2;
@@ -486,7 +486,8 @@ function mapColumnCount(width, visibleTileCount) {
 }
 
 function mapRowCount(visibleTileCount, columns) {
-  return ensureOddInRange(Math.ceil((visibleTileCount + FOCUS_RESERVED_CELL_COUNT) / columns), MAP_MIN_ROWS, MAP_MAX_ROWS);
+  const relatedTileCount = Math.max(0, visibleTileCount - 1);
+  return ensureOddInRange(Math.ceil((relatedTileCount + FOCUS_RESERVED_CELL_COUNT) / columns), MAP_MIN_ROWS, MAP_MAX_ROWS);
 }
 
 function relationAngle(model) {
@@ -498,7 +499,7 @@ function relationAngle(model) {
 }
 
 function angleDistance(angleA, angleB) {
-  // Minimum distance between two directions on a circle, including wraparound across 0/2π.
+  // Minimum circular distance after normalizing the difference into the [-π, π] range.
   const fullCircle = Math.PI * 2;
   const delta = Math.abs(((angleA - angleB + Math.PI) % fullCircle + fullCircle) % fullCircle - Math.PI);
   return delta;
@@ -793,6 +794,10 @@ function compareRoutePlansByMapLane(a, b) {
   return compareNumberAsc(a.sortLane, b.sortLane) || a.edge.id.localeCompare(b.edge.id);
 }
 
+function compareRouteEndpoints(a, b) {
+  return compareNumberAsc(a.sort, b.sort) || a.id.localeCompare(b.id);
+}
+
 const routedEdges = computed(() => {
   const plans = visibleEdges.value.map(edge => {
     const from = tileRects.value.get(edge.fromId);
@@ -825,7 +830,7 @@ const routedEdges = computed(() => {
   }
   for (const endpoints of endpointGroups.values()) {
     endpoints
-      .sort((a, b) => compareNumberAsc(a.sort, b.sort) || a.id.localeCompare(b.id))
+      .sort(compareRouteEndpoints)
       .forEach((endpoint, index) => {
         endpointOffsets.set(`${endpoint.id}:${endpoint.endpoint}`, distributeOffset(index, endpoints.length));
       });
