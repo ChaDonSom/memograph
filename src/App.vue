@@ -372,6 +372,10 @@
       :current-id="currentId"
       @navigate="navigateToNode"
       @add-relation="openModal"
+      @edit-page="editPageFromGraph"
+      @delete-page="deletePageFromGraph"
+      @edit-relation="editRelationFromGraph"
+      @delete-relation="deleteRelationFromGraph"
     />
   </div>
 
@@ -1627,6 +1631,37 @@ function dropEdge(eid) {
 
 function dropRelationEdge(relation) {
   if (relation.graphEdgeId) dropEdge(relation.graphEdgeId);
+}
+
+async function editPageFromGraph(id) {
+  await loadNode(id);
+  await selectMainView('editor');
+}
+
+function deletePageFromGraph(id) {
+  if (id === currentId.value) {
+    deletePage();
+    return;
+  }
+  deleteRelatedPage(id);
+}
+
+function graphRelationForEdge(edge) {
+  const isCurrentRelation = edge.fromId === currentId.value || edge.toId === currentId.value;
+  const targetId = isCurrentRelation && edge.toId === currentId.value ? edge.fromId : edge.toId;
+  return {
+    graphEdgeId: edge.id,
+    targetId,
+    side: isCurrentRelation && edge.toId === currentId.value ? 'incoming' : 'outgoing',
+  };
+}
+
+function editRelationFromGraph(edge) {
+  openEditRelationModal(graphRelationForEdge(edge));
+}
+
+function deleteRelationFromGraph(edge) {
+  dropEdge(edge.id);
 }
 
 function showRelationPopover(edgeId) {

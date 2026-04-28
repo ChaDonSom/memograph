@@ -804,12 +804,18 @@ body {
   stroke: rgba(129,140,248,.42);
   stroke-linecap: round;
   stroke-linejoin: round;
+  pointer-events: stroke;
   filter: drop-shadow(0 0 4px rgba(129,140,248,.22));
   transition: d 260ms ease, stroke .16s ease, stroke-width .16s ease;
 }
 
 .memo-map-route--focused {
   stroke: rgba(165,180,252,.82);
+}
+
+.memo-map-route--active {
+  stroke: rgba(221,225,245,.96);
+  filter: drop-shadow(0 0 9px rgba(165,180,252,.58));
 }
 
 .memo-map-tile {
@@ -845,7 +851,8 @@ body {
 }
 
 .memo-map-tile:hover,
-.memo-map-tile:focus-visible {
+.memo-map-tile:focus-visible,
+.memo-map-tile--connected-active {
   z-index: 6;
   border-color: rgba(165,180,252,.88);
   box-shadow:
@@ -853,6 +860,12 @@ body {
     0 18px 48px rgba(0,0,0,.46);
   transform: translateY(-1px);
   outline: none;
+}
+
+.memo-map-tile--connected-active {
+  background:
+    linear-gradient(180deg, rgba(44,50,86,.98), rgba(24,28,48,.98)),
+    var(--surface);
 }
 
 .memo-map-tile--focus {
@@ -907,11 +920,54 @@ body {
   font-size: max(8px, .58em);
 }
 
+.memo-map-tile-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: auto;
+  opacity: 0;
+  transform: translateY(4px);
+  transition: opacity .14s ease, transform .14s ease;
+}
+
+.memo-map-tile:hover .memo-map-tile-actions,
+.memo-map-tile:focus-within .memo-map-tile-actions,
+.memo-map-tile--connected-active .memo-map-tile-actions {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.memo-map-action {
+  border: 1px solid rgba(129,140,248,.28);
+  border-radius: 999px;
+  background: rgba(13,15,26,.64);
+  color: var(--muted);
+  cursor: pointer;
+  font-family: inherit;
+  font-size: max(9px, .58em);
+  font-weight: 700;
+  line-height: 1.1;
+  padding: 4px 8px;
+}
+
+.memo-map-action:hover,
+.memo-map-action:focus-visible {
+  color: var(--text);
+  border-color: rgba(129,140,248,.72);
+  outline: none;
+}
+
+.memo-map-action--danger {
+  border-color: rgba(248,113,113,.28);
+  color: color-mix(in srgb, var(--danger) 82%, var(--muted));
+}
+
 .memo-map-route-label {
   position: absolute;
   z-index: 8;
   pointer-events: auto;
   transform-origin: center;
+  transform: translate(-50%, -50%);
   transition: left 280ms ease, top 280ms ease, transform 280ms ease;
 }
 
@@ -930,6 +986,8 @@ body {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  transform: rotate(var(--memo-label-rotation, 0deg));
+  transition: transform 280ms ease, color .14s ease, border-color .14s ease;
 }
 
 .memo-map-route-label--vertical .memo-map-route-label-button {
@@ -937,7 +995,8 @@ body {
 }
 
 .memo-map-route-label:hover .memo-map-route-label-button,
-.memo-map-route-label:focus-within .memo-map-route-label-button {
+.memo-map-route-label:focus-within .memo-map-route-label-button,
+.memo-map-route-label--active .memo-map-route-label-button {
   color: var(--text);
   border-color: rgba(129,140,248,.72);
 }
@@ -990,6 +1049,13 @@ body {
   max-width: 100%;
   height: auto;
   border-radius: 5px;
+}
+
+.memo-map-route-popover-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 12px;
 }
 
 @keyframes memo-map-tile-in {

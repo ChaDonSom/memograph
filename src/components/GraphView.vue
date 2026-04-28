@@ -38,24 +38,37 @@
           v-for="route in routedEdges"
           :key="route.id"
           class="memo-map-route"
-          :class="{ 'memo-map-route--focused': route.touchesFocus }"
+          :class="{
+            'memo-map-route--focused': route.touchesFocus,
+            'memo-map-route--active': isRouteActive(route),
+          }"
           :d="route.path"
           :style="{ strokeWidth: route.strokeWidth }"
           marker-end="url(#memo-map-arrowhead)"
+          @mouseenter="activateRoute(route)"
+          @mouseleave="clearHighlight"
         />
       </svg>
 
-      <button
+      <div
         v-for="tile in visibleTiles"
         :key="tile.id"
-        type="button"
+        role="button"
+        tabindex="0"
         class="memo-map-tile"
         :class="{
           'memo-map-tile--focus': tile.isFocus,
           'memo-map-tile--remote': tile.hop > 1,
+          'memo-map-tile--connected-active': isTileActive(tile.id),
         }"
         :style="tile.style"
         @click="handleTileClick(tile)"
+        @keydown.enter.self.prevent="handleTileClick(tile)"
+        @keydown.space.self.prevent="handleTileClick(tile)"
+        @mouseenter="activateNode(tile.id)"
+        @mouseleave="clearHighlight"
+        @focusin="activateNode(tile.id)"
+        @focusout="clearHighlight"
       >
         <span class="memo-map-tile-topline">
           <span>{{ tile.roleLabel }}</span>
@@ -71,14 +84,25 @@
           No page details yet.
         </span>
         <span class="memo-map-tile-meta">{{ tile.meta }}</span>
-      </button>
+        <span class="memo-map-tile-actions" @click.stop>
+          <button type="button" class="memo-map-action" @click="$emit('edit-page', tile.id)">Edit page</button>
+          <button type="button" class="memo-map-action memo-map-action--danger" @click="$emit('delete-page', tile.id)">Delete page</button>
+        </span>
+      </div>
 
       <div
         v-for="label in routeLabels"
         :key="label.id"
         class="memo-map-route-label"
-        :class="{ 'memo-map-route-label--vertical': label.vertical }"
+        :class="{
+          'memo-map-route-label--vertical': label.vertical,
+          'memo-map-route-label--active': isRouteActive(label.route),
+        }"
         :style="label.style"
+        @mouseenter="activateRoute(label.route)"
+        @mouseleave="clearHighlight"
+        @focusin="activateRoute(label.route)"
+        @focusout="clearHighlight"
       >
         <button type="button" class="memo-map-route-label-button">
           {{ label.label }}
@@ -86,6 +110,10 @@
         <div class="memo-map-route-popover">
           <div class="memo-map-route-popover-title">{{ label.label }}</div>
           <div class="memo-map-route-popover-body" v-html="label.bodyHtml"></div>
+          <div class="memo-map-route-popover-actions">
+            <button class="btn btn-ghost" @click.stop="$emit('edit-relation', label.edge)">Edit relation</button>
+            <button class="btn btn-danger" @click.stop="$emit('delete-relation', label.edge)">Delete relation</button>
+          </div>
         </div>
       </div>
     </div>
@@ -105,14 +133,18 @@ const props = defineProps({
   currentId: { type: String, default: '' },
 });
 
-const emit = defineEmits(['navigate', 'add-relation']);
+const emit = defineEmits(['navigate', 'add-relation', 'edit-page', 'delete-page', 'edit-relation', 'delete-relation']);
 
 const stageEl = ref(null);
 const stageSize = reactive({ width: 0, height: 0 });
+const activeNodeId = ref('');
+const activeEdgeId = ref('');
 let resizeObserver = null;
 
-const CONDUIT_GAP = 18;
-const OUTER_PADDING = 10;
+const BASE_CONDUIT_GAP = 18;
+const CONDUIT_WIDTH_PER_ROUTE = 8;
+const OUTER_PADDING = 18;
+const PERIMETER_ROUTE_LANE = 9;
 const MIN_SIDE_WIDTH = 150;
 const MIN_FOCUS_WIDTH = 210;
 const MAX_VISIBLE_TILES = 28;
@@ -134,6 +166,7 @@ const TILE_MAX_FONT_SIZE = 16;
 const MIN_VERTICAL_LABEL_LENGTH = 60;
 const VERTICAL_LABEL_MIN_ASPECT_RATIO = 0.35;
 const ROUTE_EDGE_PADDING = 18;
+const SAME_GROUP_ROUTE_PADDING = 26;
 
 function clamp(value, min, max) {
   return Math.min(max, Math.max(min, value));
@@ -309,16 +342,50 @@ function treemapGroup(models, bounds) {
   treemap()
     .tile(treemapSquarify.ratio(TREEMAP_ASPECT_RATIO))
     .size([bounds.width, bounds.height])
-    .paddingInner(CONDUIT_GAP)
+    .paddingInner(bounds.padding)
     .round(true)(root);
 
   return root.leaves().map(leaf => ({
     ...leaf.data,
+    groupKey: bounds.groupKey,
+    groupIndex: bounds.groupIndex,
     x: bounds.x + leaf.x0,
     y: bounds.y + leaf.y0,
     width: Math.max(1, leaf.x1 - leaf.x0),
     height: Math.max(1, leaf.y1 - leaf.y0),
   }));
+}
+
+function corridorWidth(routeCount) {
+  return BASE_CONDUIT_GAP + routeCount * CONDUIT_WIDTH_PER_ROUTE;
+}
+
+function groupForNode(groupsByNodeId, nodeId) {
+  return groupsByNodeId.get(nodeId);
+}
+
+function corridorLoadsForGroups(groups, groupsByNodeId) {
+  const loads = Array.from({ length: Math.max(0, groups.length - 1) }, () => 0);
+  for (const edge of props.edges) {
+    const from = groupForNode(groupsByNodeId, edge.fromId);
+    const to = groupForNode(groupsByNodeId, edge.toId);
+    if (!from || !to || from.index === to.index) continue;
+    const start = Math.min(from.index, to.index);
+    const end = Math.max(from.index, to.index);
+    for (let i = start; i < end; i++) loads[i]++;
+  }
+  return loads;
+}
+
+function internalGroupLoads(groupsByNodeId) {
+  const loads = new Map();
+  for (const edge of props.edges) {
+    const from = groupForNode(groupsByNodeId, edge.fromId);
+    const to = groupForNode(groupsByNodeId, edge.toId);
+    if (!from || !to || from.index !== to.index) continue;
+    loads.set(from.key, (loads.get(from.key) || 0) + 1);
+  }
+  return loads;
 }
 
 function groupWeight(group) {
@@ -358,14 +425,14 @@ function allocateGroupWidths(groups, availableWidth) {
   return widths;
 }
 
-const layoutModels = computed(() => {
+const layoutState = computed(() => {
   const width = stageSize.width - OUTER_PADDING * 2;
   const height = stageSize.height - OUTER_PADDING * 2;
-  if (width <= 0 || height <= 0) return [];
+  if (width <= 0 || height <= 0) return { models: [], corridors: [] };
 
   const models = visibleNodeModels.value;
   const focus = models.find(model => model.node.id === props.currentId);
-  if (!focus) return [];
+  if (!focus) return { models: [], corridors: [] };
 
   const incoming = models.filter(model => model.node.id !== props.currentId && model.side === 'incoming');
   const outgoing = models.filter(model => model.node.id !== props.currentId && model.side !== 'incoming');
@@ -373,20 +440,34 @@ const layoutModels = computed(() => {
     { key: 'incoming', models: incoming, value: incoming.reduce((sum, model) => sum + model.score, 0) },
     { key: 'focus', models: [focus], value: focus.score },
     { key: 'outgoing', models: outgoing, value: outgoing.reduce((sum, model) => sum + model.score, 0) },
-  ].filter(group => group.models.length);
+  ].filter(group => group.models.length)
+    .map((group, index) => ({ ...group, index }));
 
-  const gapTotal = CONDUIT_GAP * Math.max(0, groups.length - 1);
-  const availableWidth = width - gapTotal;
+  const groupsByNodeId = new Map();
+  for (const group of groups) {
+    for (const model of group.models) {
+      groupsByNodeId.set(model.node.id, { key: group.key, index: group.index });
+    }
+  }
+
+  const corridorLoads = corridorLoadsForGroups(groups, groupsByNodeId);
+  const corridorWidths = corridorLoads.map(corridorWidth);
+  const internalLoads = internalGroupLoads(groupsByNodeId);
+  const gapTotal = corridorWidths.reduce((sum, gap) => sum + gap, 0);
+  const availableWidth = Math.max(1, width - gapTotal);
   // For multiple groups, enforce minimum widths to preserve readable columns; single-group layouts fill the stage naturally.
   const widths = allocateGroupWidths(groups, availableWidth);
 
   let x = OUTER_PADDING;
   const laidOut = [];
+  const corridors = [];
   for (const group of groups) {
     const groupWidth = widths.get(group.key);
     if (group.key === 'focus') {
       laidOut.push({
         ...focus,
+        groupKey: group.key,
+        groupIndex: group.index,
         x,
         y: OUTER_PADDING,
         width: groupWidth,
@@ -398,13 +479,28 @@ const layoutModels = computed(() => {
         y: OUTER_PADDING,
         width: groupWidth,
         height,
+        padding: corridorWidth(internalLoads.get(group.key) || 0),
+        groupKey: group.key,
+        groupIndex: group.index,
       }));
     }
-    x += groupWidth + CONDUIT_GAP;
+    const gapWidth = corridorWidths[group.index] || 0;
+    if (gapWidth) {
+      corridors[group.index] = {
+        index: group.index,
+        x: x + groupWidth,
+        width: gapWidth,
+        load: corridorLoads[group.index] || 0,
+      };
+    }
+    x += groupWidth + gapWidth;
   }
 
-  return laidOut;
+  return { models: laidOut, corridors };
 });
+
+const layoutModels = computed(() => layoutState.value.models);
+const routeCorridors = computed(() => layoutState.value.corridors);
 
 function roleLabel(model) {
   if (model.node.id === props.currentId) return 'Focused page';
@@ -455,13 +551,15 @@ function distributeOffset(index, count) {
   return (index - (count - 1) / 2) * ENDPOINT_STEP;
 }
 
+function edgeSideForRoute(from, to) {
+  return from.x + from.width / 2 <= to.x + to.width / 2;
+}
+
 function sideEndpoints(edge, index, count) {
   const from = tileRects.value.get(edge.fromId);
   const to = tileRects.value.get(edge.toId);
-  const fromCenterX = from.x + from.width / 2;
-  const toCenterX = to.x + to.width / 2;
   const laneOffset = distributeOffset(index, count);
-  const sourceOnLeft = fromCenterX <= toCenterX;
+  const sourceOnLeft = edgeSideForRoute(from, to);
   const sourceX = sourceOnLeft ? from.x + from.width : from.x;
   const targetX = sourceOnLeft ? to.x : to.x + to.width;
   return {
@@ -478,12 +576,32 @@ function sideEndpoints(edge, index, count) {
       to.y + to.height - ROUTE_EDGE_PADDING
     ),
     laneOffset,
+    sourceOnLeft,
   };
 }
 
-function routePath(points) {
+function adjacentCorridorBetween(from, to) {
+  const lowerGroupIndex = Math.min(from.groupIndex, to.groupIndex);
+  return routeCorridors.value[lowerGroupIndex] || null;
+}
+
+function laneXInCorridor(corridor, laneOffset) {
+  const center = corridor.x + corridor.width / 2;
+  return clamp(
+    center + laneOffset,
+    corridor.x + ROUTE_EDGE_PADDING / 2,
+    corridor.x + corridor.width - ROUTE_EDGE_PADDING / 2
+  );
+}
+
+function directRoutePath(points) {
   // Orthogonal route: move to source, cross the conduit horizontally, run vertically, then enter the target horizontally.
   return `M ${points.startX} ${points.startY} H ${points.midX} V ${points.endY} H ${points.endX}`;
+}
+
+function perimeterRoutePath(points) {
+  const perimeterY = points.startY <= points.endY ? PERIMETER_ROUTE_LANE : stageSize.height - PERIMETER_ROUTE_LANE;
+  return `M ${points.startX} ${points.startY} H ${points.startMidX} V ${perimeterY} H ${points.endMidX} V ${points.endY} H ${points.endX}`;
 }
 
 function labelRotation(vertical, startY, endY) {
@@ -502,19 +620,49 @@ const routedEdges = computed(() => {
 
   return visibleEdges.value.map(edge => {
     const key = `${edge.fromId}->${edge.toId}`;
+    const from = tileRects.value.get(edge.fromId);
+    const to = tileRects.value.get(edge.toId);
     const endpoints = sideEndpoints(edge, indexes.get(edge.id), counts.get(key));
-    const rawMidX = (endpoints.startX + endpoints.endX) / 2 + endpoints.laneOffset;
-    const minX = Math.min(endpoints.startX, endpoints.endX) + CONDUIT_GAP / 2;
-    const maxX = Math.max(endpoints.startX, endpoints.endX) - CONDUIT_GAP / 2;
-    const midX = clamp(rawMidX, minX, maxX);
-    const points = { ...endpoints, midX };
+    let points;
+    let path;
+    let labelSegment = 'vertical';
+    const groupDistance = Math.abs(from.groupIndex - to.groupIndex);
+    if (groupDistance === 1) {
+      const corridor = adjacentCorridorBetween(from, to);
+      const midX = corridor
+        ? laneXInCorridor(corridor, endpoints.laneOffset)
+        : (endpoints.startX + endpoints.endX) / 2;
+      points = { ...endpoints, midX };
+      path = directRoutePath(points);
+    } else if (groupDistance > 1) {
+      const startCorridor = routeCorridors.value[Math.min(from.groupIndex, to.groupIndex)] || null;
+      const endCorridor = routeCorridors.value[Math.max(from.groupIndex, to.groupIndex) - 1] || null;
+      points = {
+        ...endpoints,
+        startMidX: startCorridor ? laneXInCorridor(startCorridor, endpoints.laneOffset) : endpoints.startX,
+        endMidX: endCorridor ? laneXInCorridor(endCorridor, endpoints.laneOffset) : endpoints.endX,
+      };
+      path = perimeterRoutePath(points);
+      labelSegment = 'perimeter';
+    } else {
+      const routeOnRight = endpoints.sourceOnLeft;
+      const rawMidX = routeOnRight
+        ? Math.max(from.x + from.width, to.x + to.width) + SAME_GROUP_ROUTE_PADDING + Math.abs(endpoints.laneOffset)
+        : Math.min(from.x, to.x) - SAME_GROUP_ROUTE_PADDING - Math.abs(endpoints.laneOffset);
+      const midX = clamp(rawMidX, ROUTE_EDGE_PADDING, stageSize.width - ROUTE_EDGE_PADDING);
+      points = { ...endpoints, midX };
+      path = directRoutePath(points);
+    }
     return {
       id: edge.id,
       edge,
+      fromId: edge.fromId,
+      toId: edge.toId,
       ...points,
-      path: routePath(points),
+      path,
       label: relationLabel(edge),
       bodyHtml: relationBodyHtml(edge),
+      labelSegment,
       touchesFocus: edge.fromId === props.currentId || edge.toId === props.currentId,
       strokeWidth: 1.1 + Math.min(1.8, (edge.weight || DEFAULT_EDGE_WEIGHT) / 8),
     };
@@ -525,20 +673,27 @@ const routeLabels = computed(() =>
   routedEdges.value.map(route => {
     const verticalLength = Math.abs(route.endY - route.startY);
     const horizontalLength = Math.abs(route.endX - route.startX);
-    const vertical = verticalLength > MIN_VERTICAL_LABEL_LENGTH
+    const vertical = route.labelSegment === 'vertical'
+      && verticalLength > MIN_VERTICAL_LABEL_LENGTH
       && verticalLength > horizontalLength * VERTICAL_LABEL_MIN_ASPECT_RATIO;
     const rotation = labelRotation(vertical, route.startY, route.endY);
-    const x = vertical ? route.midX : (route.startX + route.endX) / 2;
-    const y = vertical ? (route.startY + route.endY) / 2 : route.endY - 12;
+    const x = route.labelSegment === 'perimeter'
+      ? (route.startMidX + route.endMidX) / 2
+      : (vertical ? route.midX : (route.startX + route.endX) / 2);
+    const y = route.labelSegment === 'perimeter'
+      ? (route.startY <= route.endY ? PERIMETER_ROUTE_LANE + 12 : stageSize.height - PERIMETER_ROUTE_LANE - 12)
+      : (vertical ? (route.startY + route.endY) / 2 : route.endY - 12);
     return {
       id: route.id,
       label: route.label,
       bodyHtml: route.bodyHtml,
+      route,
+      edge: route.edge,
       vertical,
       style: {
         left: `${x}px`,
         top: `${y}px`,
-        transform: `translate(-50%, -50%) rotate(${rotation}deg)`,
+        '--memo-label-rotation': `${rotation}deg`,
       },
     };
   })
@@ -546,6 +701,37 @@ const routeLabels = computed(() =>
 
 function handleTileClick(tile) {
   if (tile.id !== props.currentId) emit('navigate', tile.id);
+}
+
+function activateNode(nodeId) {
+  activeNodeId.value = nodeId;
+  activeEdgeId.value = '';
+}
+
+function activateRoute(route) {
+  activeEdgeId.value = route.id;
+  activeNodeId.value = '';
+}
+
+function clearHighlight() {
+  activeNodeId.value = '';
+  activeEdgeId.value = '';
+}
+
+function routeTouchesActiveNode(route) {
+  return !!activeNodeId.value && (route.fromId === activeNodeId.value || route.toId === activeNodeId.value);
+}
+
+function isRouteActive(route) {
+  return activeEdgeId.value === route.id || routeTouchesActiveNode(route);
+}
+
+function isTileActive(tileId) {
+  if (!tileId) return false;
+  if (activeNodeId.value === tileId) return true;
+  const activeRoute = routedEdges.value.find(route => route.id === activeEdgeId.value);
+  if (activeRoute) return activeRoute.fromId === tileId || activeRoute.toId === tileId;
+  return routedEdges.value.some(route => routeTouchesActiveNode(route) && (route.fromId === tileId || route.toId === tileId));
 }
 
 function updateStageSize() {
