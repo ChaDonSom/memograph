@@ -1660,8 +1660,8 @@ function graphDeltaFromText(bodyText) {
 function updatePageFromGraph({ id, title, bodyText }) {
   const node = findNode(id);
   if (!node) return;
-  const normalizedBody = normalizeNewlines(bodyText).trim();
-  node.title = title.trim();
+  const normalizedBody = normalizeNewlines(bodyText ?? '').trim();
+  node.title = (title ?? '').trim();
   node.bodyHtml = sanitizeRichHtml(graphBodyHtmlFromText(normalizedBody));
   node.bodyDelta = graphDeltaFromText(normalizedBody);
   node.updatedAt = Date.now();

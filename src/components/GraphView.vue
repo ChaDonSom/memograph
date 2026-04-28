@@ -689,6 +689,10 @@ function roundedOrthogonalPath(points) {
   return commands.join(' ');
 }
 
+function createVerticalBendPoints(start, end, midX) {
+  return [start, { x: midX, y: start.y }, { x: midX, y: end.y }, end];
+}
+
 function labelRotation(vertical, startY, endY) {
   if (!vertical) return 0;
   return endY < startY ? -90 : 90;
@@ -753,7 +757,7 @@ const routedEdges = computed(() => {
       const corridor = adjacentCorridorBetween(from, to);
       const laneOffset = corridorLaneOffsets.get(`${edge.id}:${Math.min(from.groupIndex, to.groupIndex)}`) || 0;
       const midX = laneXInCorridor(corridor, laneOffset) ?? (start.x + end.x) / 2;
-      points = [start, { x: midX, y: start.y }, { x: midX, y: end.y }, end];
+      points = createVerticalBendPoints(start, end, midX);
     } else if (groupDistance > 1) {
       const corridorIndexes = corridorIndexesBetween(from, to);
       const firstCorridorIndex = corridorIndexes[0];
@@ -786,7 +790,7 @@ const routedEdges = computed(() => {
       const right = plan.startSide === 'right' ? to.x : from.x;
       const laneOffset = (endpointOffsets.get(`${edge.id}:start`) || 0) * SAME_GROUP_LANE_FACTOR;
       const midX = (left + right) / 2 + laneOffset;
-      points = [start, { x: midX, y: start.y }, { x: midX, y: end.y }, end];
+      points = createVerticalBendPoints(start, end, midX);
     } else {
       const routeOnRight = plan.startSide === 'right';
       const rawMidX = routeOnRight
@@ -794,7 +798,7 @@ const routedEdges = computed(() => {
         : Math.min(from.x, to.x) - SAME_GROUP_ROUTE_PADDING;
       const laneOffset = endpointOffsets.get(`${edge.id}:start`) || 0;
       const midX = clamp(rawMidX + (routeOnRight ? laneOffset : -laneOffset), ROUTE_EDGE_PADDING, stageSize.width - ROUTE_EDGE_PADDING);
-      points = [start, { x: midX, y: start.y }, { x: midX, y: end.y }, end];
+      points = createVerticalBendPoints(start, end, midX);
     }
 
     return {
@@ -879,7 +883,7 @@ function handleTileKeydown(event, tile) {
 function startTileEdit(tile) {
   editingTileId.value = tile.id;
   tileDraft.title = tile.title;
-  tileDraft.bodyText = tile.bodyText;
+  tileDraft.bodyText = tile.bodyText || '';
 }
 
 function cancelTileEdit() {
