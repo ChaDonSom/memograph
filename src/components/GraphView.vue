@@ -206,7 +206,9 @@ const MAP_MIN_COLUMNS = 5;
 const MAP_MAX_COLUMNS = 7;
 const MAP_MIN_ROWS = 5;
 const MAP_MAX_ROWS = 7;
-const MAP_MAX_RING = Math.floor(Math.max(MAP_MAX_ROWS, MAP_MAX_COLUMNS) / 2);
+const FOCUS_ZONE_RADIUS = 1;
+const FOCUS_RESERVED_CELL_COUNT = Math.pow(FOCUS_ZONE_RADIUS * 2 + 1, 2) - 1;
+const MAP_MAX_HOP_RING = Math.floor(Math.max(MAP_MAX_ROWS, MAP_MAX_COLUMNS) / 2);
 const ANGLE_SPREAD_BINS = 5;
 const ANGLE_SPREAD_CENTER = 2;
 const ANGLE_SPREAD_STEP = Math.PI / 10;
@@ -467,13 +469,13 @@ function oddClamp(value, min, max) {
   return clamped % 2 === 0 ? Math.min(max, clamped + 1) : clamped;
 }
 
-function mapColumnCount(width, tileCount) {
-  const preferred = width >= 980 || tileCount > 20 ? MAP_MAX_COLUMNS : MAP_MIN_COLUMNS;
+function mapColumnCount(width, visibleTileCount) {
+  const preferred = width >= 980 || visibleTileCount > 20 ? MAP_MAX_COLUMNS : MAP_MIN_COLUMNS;
   return oddClamp(preferred, MAP_MIN_COLUMNS, MAP_MAX_COLUMNS);
 }
 
-function mapRowCount(tileCount, columns) {
-  return oddClamp(Math.ceil((tileCount + 8) / columns), MAP_MIN_ROWS, MAP_MAX_ROWS);
+function mapRowCount(visibleTileCount, columns) {
+  return oddClamp(Math.ceil((visibleTileCount + FOCUS_RESERVED_CELL_COUNT) / columns), MAP_MIN_ROWS, MAP_MAX_ROWS);
 }
 
 function relationAngle(model) {
@@ -485,11 +487,13 @@ function relationAngle(model) {
 }
 
 function angleDistance(a, b) {
+  // Minimum distance between two directions on a circle, including wraparound across 0/2π.
   const fullCircle = Math.PI * 2;
   const delta = Math.abs(((a - b + Math.PI) % fullCircle + fullCircle) % fullCircle - Math.PI);
   return delta;
 }
 
+// Stable, small integer hash used only to fan equal-priority cards into deterministic map positions.
 function hashString(value) {
   let hash = 0;
   for (const char of String(value)) hash = (hash * 31 + char.charCodeAt(0)) >>> 0;
@@ -513,7 +517,7 @@ function mapCells(columns, rows, bounds) {
     for (let col = 0; col < columns; col++) {
       const dx = col - centerCol;
       const dy = row - centerRow;
-      const isFocusZone = Math.abs(dx) <= 1 && Math.abs(dy) <= 1;
+      const isFocusZone = Math.abs(dx) <= FOCUS_ZONE_RADIUS && Math.abs(dy) <= FOCUS_ZONE_RADIUS;
       cells.push({
         col,
         row,
@@ -562,7 +566,7 @@ function cardRectForCell(model, cell, isFocus = false) {
 
 function assignMapCell(model, availableCells, usedCells) {
   const preferredAngle = relationAngle(model);
-  const targetRing = clamp(model.hop || 1, 1, MAP_MAX_RING);
+  const targetRing = clamp(model.hop || 1, 1, MAP_MAX_HOP_RING);
   const cell = availableCells
     .filter(candidate => !usedCells.has(`${candidate.col}:${candidate.row}`))
     .sort((a, b) =>
@@ -814,10 +818,10 @@ const routedEdges = computed(() => {
     const start = pointOutsideRect(plan.from, plan.startSide, endpointOffsets.get(`${edge.id}:start`) || 0);
     const end = pointOutsideRect(plan.to, plan.endSide, endpointOffsets.get(`${edge.id}:end`) || 0);
     const lane = laneIndexes.get(edge.id) || { index: 0, count: 1 };
-    const laneCoordinate = mapLaneCoordinate(start, end, plan.axis, lane.index, lane.count);
+    const lanePosition = mapLaneCoordinate(start, end, plan.axis, lane.index, lane.count);
     const points = plan.axis === 'x'
-      ? [start, { x: laneCoordinate, y: start.y }, { x: laneCoordinate, y: end.y }, end]
-      : [start, { x: start.x, y: laneCoordinate }, { x: end.x, y: laneCoordinate }, end];
+      ? [start, { x: lanePosition, y: start.y }, { x: lanePosition, y: end.y }, end]
+      : [start, { x: start.x, y: lanePosition }, { x: end.x, y: lanePosition }, end];
 
     const strokeWidth = 1.1 + Math.min(1.8, (edge.weight || DEFAULT_EDGE_WEIGHT) / 8);
     return {
