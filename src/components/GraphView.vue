@@ -239,6 +239,12 @@ function clamp(value, min, max) {
   return Math.min(max, Math.max(min, value));
 }
 
+function compareNumberAsc(a, b) {
+  if (a < b) return -1;
+  if (a > b) return 1;
+  return 0;
+}
+
 function escapeText(value) {
   return String(value)
     .replace(/&/g, '&amp;')
@@ -445,7 +451,7 @@ const visibleNodeModels = computed(() => {
 });
 
 function groupWeight(group) {
-  if (!Number.isFinite(group.value)) return 1;
+  if (group.value == null || !Number.isFinite(group.value)) return 1;
   return Math.max(1, Math.sqrt(group.value));
 }
 
@@ -534,7 +540,9 @@ function allocateStackHeights(models, availableHeight) {
 }
 
 function compareStackModels(a, b) {
-  return a.hop - b.hop || b.score - a.score || a.node.id.localeCompare(b.node.id);
+  return compareNumberAsc(a.hop, b.hop)
+    || compareNumberAsc(b.score, a.score)
+    || a.node.id.localeCompare(b.node.id);
 }
 
 function stackGroup(group, bounds) {
@@ -787,7 +795,7 @@ function labelRotation(vertical, startY, endY) {
 }
 
 function compareRoutePlansByYMidpoint(a, b) {
-  return a.sortY - b.sortY || a.edge.id.localeCompare(b.edge.id);
+  return compareNumberAsc(a.sortY, b.sortY) || a.edge.id.localeCompare(b.edge.id);
 }
 
 const routedEdges = computed(() => {
