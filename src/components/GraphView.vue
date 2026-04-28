@@ -170,8 +170,10 @@ const editingTileId = ref('');
 const tileDraft = reactive({ title: '', bodyText: '' });
 let resizeObserver = null;
 
-const BASE_CORRIDOR_GAP = 12; // Minimum whitespace preserved between block groups before route lanes are added.
-const CORRIDOR_WIDTH_PER_ROUTE = 7; // Extra corridor width assigned for each route sharing that whitespace.
+/** Minimum whitespace preserved between block groups before route lanes are added. */
+const BASE_CORRIDOR_GAP = 12;
+/** Extra corridor width assigned for each route sharing that whitespace. */
+const CORRIDOR_WIDTH_PER_ROUTE = 7;
 const OUTER_PADDING = 18;
 const PERIMETER_ROUTE_LANE = 12;
 const MIN_SIDE_WIDTH = 150;
@@ -197,7 +199,8 @@ const ROUTE_EDGE_PADDING = 18;
 const ROUTE_CARD_CLEARANCE = 11;
 const ROUTE_CORNER_RADIUS = 9;
 const SAME_GROUP_ROUTE_PADDING = 24;
-const SAME_GROUP_LANE_FACTOR = 0.45; // Same-group routes use tighter offsets because their tile-to-tile gaps are already narrow.
+/** Same-group routes use tighter offsets because their tile-to-tile gaps are already narrow. */
+const SAME_GROUP_LANE_FACTOR = 0.45;
 const LANE_STEP = 10;
 
 function clamp(value, min, max) {
