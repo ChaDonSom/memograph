@@ -1656,17 +1656,17 @@ function deletePageFromGraph(id) {
 function updatePageFromGraph({ id, title, bodyDelta, bodyHtml }) {
   const node = findNode(id);
   if (!node) return;
-  let pageDelta = { ops: [{ insert: '\n' }] };
+  let pageDelta = null;
   if (bodyDelta) {
     try {
       pageDelta = sanitizeRichDelta(JSON.parse(bodyDelta));
     } catch (error) {
-      console.warn('Unable to parse graph editor Delta; saving sanitized HTML content only. Some formatting may be lost when reopening the editor.', error);
+      console.warn('Unable to parse graph editor Delta; keeping the previous editor Delta.', error);
     }
   }
   node.title = (title ?? '').trim();
   node.bodyHtml = sanitizeRichHtml(normalizeEditorHtml(bodyHtml || ''));
-  node.bodyDelta = JSON.stringify(pageDelta);
+  if (pageDelta) node.bodyDelta = JSON.stringify(pageDelta);
   node.updatedAt = Date.now();
   persist();
 }

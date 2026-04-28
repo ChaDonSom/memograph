@@ -22,17 +22,6 @@
         aria-hidden="true"
       >
         <defs>
-          <marker
-            id="memo-map-arrowhead"
-            markerWidth="10"
-            markerHeight="10"
-            refX="9"
-            refY="5"
-            orient="auto"
-            markerUnits="userSpaceOnUse"
-          >
-            <path d="M 0 0 L 10 5 L 0 10 z" fill="var(--accent)" />
-          </marker>
           <mask
             id="memo-map-route-card-mask"
             maskUnits="userSpaceOnUse"
@@ -246,12 +235,11 @@ let tileEditor = null;
 let tileEditorHost = null;
 let tileImageClickHandler = null;
 
-// Minimum visual gap between card columns even when no routes pass through.
-const BASE_CORRIDOR_GAP = 12;
-// How far apart adjacent lanes are spaced inside a corridor (px).
-const LANE_STEP = 12;
-// Inset from each corridor edge so routes never clip the card border.
+// Compact, visible spacing between routes.
+const BASE_CORRIDOR_GAP = 10;
+const LANE_STEP = 10;
 const LANE_MARGIN = 4;
+const MAX_INTERNAL_TILE_GAP = 18;
 const OUTER_PADDING = 18;
 const PERIMETER_ROUTE_LANE = 12;
 const MIN_SIDE_WIDTH = 150;
@@ -280,7 +268,7 @@ const ROUTE_MASK_CARD_BLEED = 0;
 const ROUTE_MASK_CARD_BORDER_RADIUS = 13;
 const ROUTE_CORNER_RADIUS = 9;
 const SAME_GROUP_ROUTE_PADDING = 24;
-const SAME_GROUP_LANE_STEP = 24;
+const SAME_GROUP_LANE_STEP = 16;
 const LABEL_DEFAULT_OFFSET = 12;
 const LABEL_STACK_STEP = 18;
 const LABEL_COLLISION_GAP = 8;
@@ -533,9 +521,13 @@ function treemapGroup(models, bounds) {
 }
 
 function corridorWidth(routeCount) {
-  // Each additional route after the first needs its own LANE_STEP of space.
-  // 1 route sits at the center and needs no extra width beyond the base gap.
-  return BASE_CORRIDOR_GAP + Math.max(0, routeCount - 1) * LANE_STEP;
+  if (routeCount <= 0) return BASE_CORRIDOR_GAP;
+  return LANE_MARGIN * 2 + routeCount * LANE_STEP;
+}
+
+function internalTileGap(routeCount) {
+  if (routeCount <= 0) return BASE_CORRIDOR_GAP;
+  return Math.min(MAX_INTERNAL_TILE_GAP, BASE_CORRIDOR_GAP + routeCount * 2);
 }
 
 function createCorridorLoadsArray(groupCount) {
@@ -661,7 +653,7 @@ const layoutState = computed(() => {
         y: OUTER_PADDING,
         width: groupWidth,
         height,
-        padding: corridorWidth(internalLoads.get(group.key) || 0),
+        padding: internalTileGap(internalLoads.get(group.key) || 0),
         groupKey: group.key,
         groupIndex: group.index,
       }));
@@ -1538,6 +1530,13 @@ function initTileEditor() {
 }
 
 async function startTileEdit(tile) {
+  if (editingTileId.value && editingTileId.value !== tile.id) {
+    cancelTileEdit();
+  } else {
+    removeTileImageClickHandlers();
+    hideTileImageResizeBar();
+    tileEditor = null;
+  }
   editingTileId.value = tile.id;
   tileDraft.title = tile.title;
   tileDraft.bodyDelta = tile.bodyDelta || '';
