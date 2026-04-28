@@ -843,6 +843,12 @@ function compactOrthogonalPoints(points) {
   return compacted;
 }
 
+function enqueueRouteState(queue, entry) {
+  const index = queue.findIndex(item => item.cost > entry.cost);
+  if (index === -1) queue.push(entry);
+  else queue.splice(index, 0, entry);
+}
+
 function findClearOrthogonalRoute(points) {
   points = points.map(routePoint);
   const obstacles = routeObstacleRects();
@@ -866,10 +872,9 @@ function findClearOrthogonalRoute(points) {
   const queue = [];
   const startState = `${nodeKey(start.x, start.y)}|none`;
   distances.set(startState, 0);
-  queue.push({ state: startState, cost: 0 });
+  enqueueRouteState(queue, { state: startState, cost: 0 });
 
   while (queue.length) {
-    queue.sort((a, b) => a.cost - b.cost);
     const { state, cost } = queue.shift();
     if (cost !== distances.get(state)) continue;
     const [key, previousAxis] = state.split('|');
@@ -903,7 +908,7 @@ function findClearOrthogonalRoute(points) {
       if (nextCost >= (distances.get(nextState) ?? Number.POSITIVE_INFINITY)) continue;
       distances.set(nextState, nextCost);
       previous.set(nextState, state);
-      queue.push({ state: nextState, cost: nextCost });
+      enqueueRouteState(queue, { state: nextState, cost: nextCost });
     }
   }
 
@@ -1022,8 +1027,8 @@ const routedEdges = computed(() => {
       points = createVerticalBendPoints(start, end, midX);
     }
 
-    points = findClearOrthogonalRoute(points);
     const strokeWidth = 1.1 + Math.min(1.8, (edge.weight || DEFAULT_EDGE_WEIGHT) / 8);
+    points = findClearOrthogonalRoute(points);
     return {
       id: edge.id,
       edge,
