@@ -33,19 +33,34 @@
       <input v-model="search" placeholder="Search pages…" />
     </div>
 
-    <div class="s-list">
-      <div
-        v-for="n in filteredNodes"
+      <div class="s-list">
+        <div
+          v-for="n in filteredNodes"
         :key="n.id"
         class="n-item"
         :class="{ active: n.id === currentId }"
         @click="navigateToNode(n.id)"
       >{{ n.title || '(untitled)' }}</div>
-    </div>
+      </div>
 
-    <div class="s-foot">
-      <button class="btn-new" @click="createNode">+ New Page</button>
-      <button class="btn-icon" title="Import JSON" @click="triggerImportData">↑</button>
+      <div class="s-view-toggle" role="group" aria-label="Main view">
+        <button
+          type="button"
+          :class="{ active: mainView === 'editor' }"
+          :aria-pressed="mainView === 'editor'"
+          @click="selectMainView('editor')"
+        >Editor</button>
+        <button
+          type="button"
+          :class="{ active: mainView === 'graph' }"
+          :aria-pressed="mainView === 'graph'"
+          @click="selectMainView('graph')"
+        >Graph</button>
+      </div>
+
+      <div class="s-foot">
+        <button class="btn-new" @click="createNode">+ New Page</button>
+        <button class="btn-icon" title="Import JSON" @click="triggerImportData">↑</button>
       <button class="btn-icon" title="Export JSON" @click="exportData">↓</button>
     </div>
   </div>
@@ -61,7 +76,7 @@
   />
 
   <!-- ── Main: editor ─────────────────────────── -->
-  <div class="main" v-if="current">
+  <div class="main" v-if="current && mainView === 'editor'">
     <div class="main-scroll" ref="mainScrollEl">
       <div class="relationship-canvas" ref="relationshipCanvasEl">
         <svg
@@ -351,6 +366,21 @@
     </div>
   </div>
 
+  <!-- ── Main: graph library preview ─────────────── -->
+  <div class="main" v-else-if="current && mainView === 'graph'">
+    <GraphView
+      :nodes="nodes"
+      :edges="edges"
+      :current-id="currentId"
+      @navigate="navigateToNode"
+      @add-relation="openModal"
+      @delete-page="deletePageFromGraph"
+      @update-page="updatePageFromGraph"
+      @edit-relation="editRelationFromGraph"
+      @delete-relation="deleteRelationFromGraph"
+    />
+  </div>
+
   <!-- ── Main: empty state ────────────────────── -->
   <div class="main" v-else>
     <div class="empty">
@@ -436,7 +466,7 @@
 </template>
 
 <script setup>
-import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue';
+import { computed, defineAsyncComponent, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue';
 import Quill from 'quill';
 import { loadGraph, saveGraph } from './services/graphRepository.js';
 import { imageUploadHandler } from './utils/imageCompression.js';
@@ -458,6 +488,8 @@ import {
   truncateText,
 } from './utils/text.js';
 import { DEFAULT_EDGE_WEIGHT, pScore, timeAgo } from './utils/scoring.js';
+
+const GraphView = defineAsyncComponent(() => import('./components/GraphView.vue'));
 
 // Extend Quill's Image blot to persist a width style attribute.
 const BaseImageBlot = Quill.import('formats/image');
@@ -528,6 +560,7 @@ const currentId = ref(null);
 const search = ref('');
 const listOpen = ref(false);
 const sidebarCollapsed = ref(false);
+const mainView = ref('editor');
 const sidebarEl = ref(null);
 const mainScrollEl = ref(null);
 const relationshipCanvasEl = ref(null);
@@ -1146,10 +1179,33 @@ function scheduleConnectorUpdate() {
   });
 }
 
+async function selectMainView(view) {
+  if (mainView.value === view) return;
+  if (mainView.value === 'editor') {
+    flush();
+    removeConnectorScrollListener();
+    unobserveConnectorTargets();
+  }
+  mainView.value = view;
+  if (view === 'editor') {
+    await nextTick();
+    initEditor();
+    observeConnectorTargets();
+    addConnectorScrollListener();
+    scheduleConnectorUpdate();
+  }
+}
+
 function observeConnectorTargets() {
   if (!connectorResizeObserver) return;
   if (relationshipCanvasEl.value) connectorResizeObserver.observe(relationshipCanvasEl.value);
   if (centerPanelEl.value) connectorResizeObserver.observe(centerPanelEl.value);
+}
+
+function unobserveConnectorTargets() {
+  if (!connectorResizeObserver) return;
+  if (relationshipCanvasEl.value) connectorResizeObserver.unobserve(relationshipCanvasEl.value);
+  if (centerPanelEl.value) connectorResizeObserver.unobserve(centerPanelEl.value);
 }
 
 function addConnectorScrollListener() {
@@ -1587,6 +1643,64 @@ function dropEdge(eid) {
 
 function dropRelationEdge(relation) {
   if (relation.graphEdgeId) dropEdge(relation.graphEdgeId);
+}
+
+function deletePageFromGraph(id) {
+  if (id === currentId.value) {
+    deletePage();
+    return;
+  }
+  deleteRelatedPage(id);
+}
+
+/**
+ * Converts graph-card plain text edits into sanitized editor HTML.
+ * Blank-line breaks become paragraphs; single line breaks stay inside the paragraph as <br>.
+ */
+function graphBodyHtmlFromText(bodyText) {
+  const normalized = normalizeNewlines(bodyText).trim();
+  if (!normalized) return '';
+  return normalized
+    .split(/\n{2,}/)
+    .map(paragraph => `<p>${escapeHtml(paragraph.trim()).replace(/\n/g, '<br>')}</p>`)
+    .join('');
+}
+
+/**
+ * Stores graph-card plain text edits in the same Quill Delta shape used by the editor.
+ */
+function graphDeltaFromText(bodyText) {
+  return JSON.stringify({ ops: [{ insert: bodyText ? `${bodyText}\n` : '\n' }] });
+}
+
+function updatePageFromGraph({ id, title, bodyText }) {
+  const node = findNode(id);
+  if (!node) return;
+  const normalizedBody = normalizeNewlines(bodyText ?? '').trim();
+  node.title = (title ?? '').trim();
+  node.bodyHtml = sanitizeRichHtml(graphBodyHtmlFromText(normalizedBody));
+  node.bodyDelta = graphDeltaFromText(normalizedBody);
+  node.updatedAt = Date.now();
+  persist();
+}
+
+function graphRelationForEdge(edge) {
+  const isCurrentRelation = edge.fromId === currentId.value || edge.toId === currentId.value;
+  const isIncoming = isCurrentRelation && edge.toId === currentId.value;
+  const targetId = isIncoming ? edge.fromId : edge.toId;
+  return {
+    graphEdgeId: edge.id,
+    targetId,
+    side: isIncoming ? 'incoming' : 'outgoing',
+  };
+}
+
+function editRelationFromGraph(edge) {
+  openEditRelationModal(graphRelationForEdge(edge));
+}
+
+function deleteRelationFromGraph(edge) {
+  dropEdge(edge.id);
 }
 
 function showRelationPopover(edgeId) {

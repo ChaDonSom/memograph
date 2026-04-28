@@ -127,6 +127,34 @@ body {
   gap: 8px;
 }
 
+.s-view-toggle {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+  padding: 10px 12px;
+  border-top: 1px solid var(--border);
+}
+
+.s-view-toggle button {
+  border: 1px solid var(--border);
+  background: var(--surface2);
+  color: var(--muted);
+  border-radius: 6px;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  padding: 7px 8px;
+  transition: all .12s;
+}
+
+.s-view-toggle button:hover,
+.s-view-toggle button.active {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: var(--accent-d);
+}
+
 .btn-new {
   flex: 1;
   padding: 8px 0;
@@ -688,6 +716,407 @@ body {
   margin-top: 12px;
 }
 
+/* ── Graph block-map preview ─────────────────────── */
+.memo-graph-view {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  padding: 18px;
+  gap: 10px;
+}
+
+.memo-graph-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  background: linear-gradient(135deg, rgba(28,32,53,.94), rgba(20,23,38,.92));
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 12px 14px;
+  box-shadow: 0 12px 32px rgba(0,0,0,.22);
+}
+
+.memo-graph-kicker {
+  color: var(--accent);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: .14em;
+  text-transform: uppercase;
+  margin-bottom: 4px;
+}
+
+.memo-graph-toolbar h2 {
+  font-size: 16px;
+  line-height: 1.25;
+}
+
+.memo-graph-toolbar-summary {
+  color: var(--dim);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: .04em;
+  margin-left: auto;
+  white-space: nowrap;
+}
+
+.memo-graph-toolbar-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.memo-map-stage {
+  flex: 1;
+  min-height: 460px;
+  position: relative;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  background:
+    linear-gradient(90deg, rgba(129,140,248,.08) 1px, transparent 1px) 0 0 / 18px 18px,
+    linear-gradient(180deg, rgba(129,140,248,.08) 1px, transparent 1px) 0 0 / 18px 18px,
+    linear-gradient(135deg, #0b0d17, #111421 58%, #0d0f1a);
+  overflow: hidden;
+}
+
+.memo-map-stage::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(circle at 50% 50%, rgba(129,140,248,.14), transparent 42%),
+    radial-gradient(circle at 12% 80%, rgba(129,140,248,.10), transparent 28%);
+  pointer-events: none;
+}
+
+.memo-map-routes {
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+  overflow: visible;
+  pointer-events: none;
+}
+
+.memo-map-route {
+  fill: none;
+  stroke: rgba(129,140,248,.42);
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  pointer-events: stroke;
+  filter: drop-shadow(0 0 4px rgba(129,140,248,.22));
+  transition: d 260ms ease, stroke .16s ease, stroke-width .16s ease;
+}
+
+.memo-map-route-hit {
+  fill: none;
+  stroke: transparent;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  pointer-events: stroke;
+}
+
+.memo-map-route--focused {
+  stroke: rgba(165,180,252,.82);
+}
+
+.memo-map-route--active {
+  stroke: rgba(221,225,245,.96);
+  filter: drop-shadow(0 0 9px rgba(165,180,252,.58));
+}
+
+.memo-map-tile {
+  position: absolute;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  gap: .45em;
+  padding: .82em .9em .7em;
+  color: var(--text);
+  background:
+    linear-gradient(180deg, rgba(35,40,69,.97), rgba(20,23,38,.98)),
+    var(--surface);
+  border: 1px solid rgba(129,140,248,.28);
+  border-radius: 12px;
+  box-shadow:
+    0 14px 36px rgba(0,0,0,.38),
+    inset 0 1px rgba(255,255,255,.04);
+  overflow: hidden;
+  text-align: left;
+  cursor: pointer;
+  font-family: inherit;
+  transition:
+    left 280ms ease,
+    top 280ms ease,
+    width 280ms ease,
+    height 280ms ease,
+    border-color .15s ease,
+    box-shadow .15s ease,
+    opacity .15s ease,
+    transform .15s ease;
+  animation: memo-map-tile-in 220ms ease both;
+}
+
+.memo-map-tile:hover,
+.memo-map-tile:focus-visible,
+.memo-map-tile--connected-active {
+  z-index: 6;
+  border-color: rgba(165,180,252,.88);
+  box-shadow:
+    0 0 0 4px rgba(129,140,248,.12),
+    0 18px 48px rgba(0,0,0,.46);
+  transform: translateY(-1px);
+  outline: none;
+}
+
+.memo-map-tile--connected-active {
+  background:
+    linear-gradient(180deg, rgba(44,50,86,.98), rgba(24,28,48,.98)),
+    var(--surface);
+}
+
+.memo-map-tile--focus {
+  border-color: rgba(165,180,252,.9);
+  box-shadow:
+    0 0 0 4px rgba(129,140,248,.14),
+    0 20px 54px rgba(0,0,0,.48);
+}
+
+.memo-map-tile--remote {
+  opacity: .78;
+  border-style: dashed;
+}
+
+.memo-map-tile-topline {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  color: var(--muted);
+  font-size: max(8px, .55em);
+  font-weight: 800;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+}
+
+.memo-map-tile-title {
+  display: block;
+  font-size: 1.08em;
+  font-weight: 800;
+  line-height: 1.16;
+}
+
+.memo-map-tile-body {
+  display: block;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: .78em;
+  line-height: 1.42;
+  mask-image: linear-gradient(#000 82%, transparent);
+}
+
+.memo-map-tile-body--empty {
+  font-style: italic;
+}
+
+.memo-map-tile-editor {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.memo-map-tile-title-input,
+.memo-map-tile-body-input {
+  width: 100%;
+  border: 1px solid rgba(129,140,248,.3);
+  border-radius: 8px;
+  background: rgba(13,15,26,.58);
+  color: var(--text);
+  font: inherit;
+  outline: none;
+}
+
+.memo-map-tile-title-input {
+  padding: 6px 8px;
+  font-weight: 800;
+}
+
+.memo-map-tile-body-input {
+  flex: 1;
+  min-height: 56px;
+  resize: none;
+  padding: 8px;
+  color: var(--muted);
+  font-size: .78em;
+  line-height: 1.42;
+}
+
+.memo-map-tile-title-input:focus,
+.memo-map-tile-body-input:focus {
+  border-color: rgba(165,180,252,.86);
+  box-shadow: 0 0 0 3px rgba(129,140,248,.12);
+}
+
+.memo-map-tile-editor-actions {
+  display: flex;
+  gap: 6px;
+  justify-content: flex-end;
+}
+
+.memo-map-tile-meta {
+  display: block;
+  color: var(--dim);
+  font-size: max(8px, .58em);
+}
+
+.memo-map-tile-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: auto;
+  opacity: 0;
+  transform: translateY(4px);
+  transition: opacity .14s ease, transform .14s ease;
+}
+
+.memo-map-tile:hover .memo-map-tile-actions,
+.memo-map-tile:focus-within .memo-map-tile-actions,
+.memo-map-tile--connected-active .memo-map-tile-actions {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.memo-map-action {
+  border: 1px solid rgba(129,140,248,.28);
+  border-radius: 999px;
+  background: rgba(13,15,26,.64);
+  color: var(--muted);
+  cursor: pointer;
+  font-family: inherit;
+  font-size: max(9px, .58em);
+  font-weight: 700;
+  line-height: 1.1;
+  padding: 4px 8px;
+}
+
+.memo-map-action:hover,
+.memo-map-action:focus-visible {
+  color: var(--text);
+  border-color: rgba(129,140,248,.72);
+  outline: none;
+}
+
+.memo-map-action--danger {
+  border-color: rgba(248,113,113,.28);
+  color: var(--danger);
+}
+
+.memo-map-route-label {
+  position: absolute;
+  z-index: 8;
+  pointer-events: auto;
+  transform-origin: center;
+  transform: translate(-50%, -50%);
+  transition: left 280ms ease, top 280ms ease, transform 280ms ease;
+}
+
+.memo-map-route-label-button {
+  max-width: 170px;
+  border: 1px solid rgba(129,140,248,.28);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--bg) 80%, var(--accent) 20%);
+  color: var(--muted);
+  box-shadow: 0 0 0 4px rgba(13,15,26,.9), 0 8px 22px rgba(0,0,0,.36);
+  cursor: help;
+  font-family: inherit;
+  font-size: 10px;
+  line-height: 1.25;
+  padding: 4px 10px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  transform: rotate(var(--memo-label-rotation, 0deg));
+  transition: transform 280ms ease, color .14s ease, border-color .14s ease;
+}
+
+.memo-map-route-label--vertical .memo-map-route-label-button {
+  max-width: 150px;
+}
+
+.memo-map-route-label:hover .memo-map-route-label-button,
+.memo-map-route-label:focus-within .memo-map-route-label-button,
+.memo-map-route-label--active .memo-map-route-label-button {
+  color: var(--text);
+  border-color: rgba(129,140,248,.72);
+}
+
+.memo-map-route-popover {
+  position: absolute;
+  left: 50%;
+  top: 24px;
+  width: 320px;
+  max-width: min(320px, calc(100vw - 40px));
+  transform: translateX(-50%) scale(.96);
+  transform-origin: top center;
+  opacity: 0;
+  pointer-events: none;
+  background: var(--surface);
+  border: 1px solid var(--border2);
+  border-radius: 10px;
+  padding: 13px;
+  box-shadow: 0 18px 46px rgba(0,0,0,.72), 0 0 0 1px rgba(129,140,248,.08);
+  transition: opacity .14s ease, transform .14s ease;
+}
+
+.memo-map-route-label:hover .memo-map-route-popover,
+.memo-map-route-label:focus-within .memo-map-route-popover {
+  opacity: 1;
+  pointer-events: auto;
+  transform: translateX(-50%) scale(1);
+}
+
+.memo-map-route-popover-title {
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 800;
+  line-height: 1.3;
+  margin-bottom: 8px;
+}
+
+.memo-map-route-popover-body {
+  max-height: 180px;
+  overflow: auto;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.memo-map-route-popover-body p { margin: 0 0 5px; }
+.memo-map-route-popover-body p:last-child { margin-bottom: 0; }
+.memo-map-route-popover-body img {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  border-radius: 5px;
+}
+
+.memo-map-route-popover-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+@keyframes memo-map-tile-in {
+  from { opacity: 0; transform: scale(.96); }
+  to { opacity: 1; transform: scale(1); }
+}
+
 /* ── Empty state ───────────────────────────────── */
 .empty {
   flex: 1;
@@ -950,6 +1379,7 @@ body {
   /* Hide full sidebar sections on mobile */
   .s-head { display: none; }
   .s-search { display: none; }
+  .s-view-toggle { display: none; }
   .s-foot { display: none; }
 
   /* Collapse list by default; drop down as overlay when list-open */
@@ -994,6 +1424,15 @@ body {
 
   .page-title {
     font-size: 25px;
+  }
+
+  .memo-graph-view {
+    padding: 16px;
+  }
+
+  .memo-graph-toolbar {
+    align-items: flex-start;
+    flex-direction: column;
   }
 }
 
