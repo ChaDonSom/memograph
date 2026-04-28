@@ -24,15 +24,35 @@
         <defs>
           <marker
             id="memo-map-arrowhead"
-            markerWidth="9"
-            markerHeight="9"
-            refX="8"
-            refY="4.5"
+            markerWidth="10"
+            markerHeight="10"
+            refX="9"
+            refY="5"
             orient="auto"
-            markerUnits="strokeWidth"
+            markerUnits="userSpaceOnUse"
           >
-            <path d="M 0 0 L 9 4.5 L 0 9 z" fill="var(--accent)" />
+            <path d="M 0 0 L 10 5 L 0 10 z" fill="var(--accent)" />
           </marker>
+          <mask
+            id="memo-map-route-card-mask"
+            maskUnits="userSpaceOnUse"
+            :x="0"
+            :y="0"
+            :width="stageSize.width"
+            :height="stageSize.height"
+          >
+            <rect :width="stageSize.width" :height="stageSize.height" fill="white" />
+            <rect
+              v-for="tile in visibleTiles"
+              :key="`route-mask-${tile.id}`"
+              :x="tile.rect.x - ROUTE_MASK_CARD_BLEED"
+              :y="tile.rect.y - ROUTE_MASK_CARD_BLEED"
+              :width="tile.rect.width + ROUTE_MASK_CARD_BLEED * 2"
+              :height="tile.rect.height + ROUTE_MASK_CARD_BLEED * 2"
+              rx="13"
+              fill="black"
+            />
+          </mask>
         </defs>
         <path
           v-for="route in routedEdges"
@@ -44,6 +64,7 @@
           }"
           :d="route.path"
           :style="{ strokeWidth: route.strokeWidth }"
+          mask="url(#memo-map-route-card-mask)"
           marker-end="url(#memo-map-arrowhead)"
           @mouseenter="activateRoute(route)"
           @mouseleave="clearHighlight"
@@ -197,7 +218,8 @@ const FOCUS_MAX_FONT_SIZE = 18;
 const TILE_MAX_FONT_SIZE = 16;
 const MIN_VERTICAL_LABEL_LENGTH = 60;
 const ROUTE_EDGE_PADDING = 18;
-const ROUTE_CARD_CLEARANCE = 11;
+const ROUTE_CARD_CLEARANCE = 24;
+const ROUTE_MASK_CARD_BLEED = 3;
 const ROUTE_CORNER_RADIUS = 9;
 const SAME_GROUP_ROUTE_PADDING = 24;
 /** Scales down lane offsets for same-group routes because tile-to-tile gaps are already narrow. */
