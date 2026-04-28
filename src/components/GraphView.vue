@@ -102,6 +102,7 @@
           'memo-map-tile--focus': tile.isFocus,
           'memo-map-tile--remote': tile.hop > 1,
           'memo-map-tile--connected-active': isTileActive(tile.id),
+          'memo-map-tile--popover-target': isPopoverTarget(tile.id),
         }"
         :style="tile.style"
         @click="handleTileClick(tile)"
@@ -188,8 +189,8 @@
               type="button"
               class="memo-map-route-popover-link"
               @click.stop="navigateToRouteNode(label.route.fromId)"
-              @mouseenter.stop="activateNode(label.route.fromId)"
-              @mouseleave.stop="activateRoute(label.route)"
+              @mouseenter.stop="activatePopoverNode(label.route.fromId, label.route)"
+              @mouseleave.stop="clearPopoverNode(label.route)"
             >
               {{ label.fromTitle }}
             </button>
@@ -198,8 +199,8 @@
               type="button"
               class="memo-map-route-popover-link"
               @click.stop="navigateToRouteNode(label.route.toId)"
-              @mouseenter.stop="activateNode(label.route.toId)"
-              @mouseleave.stop="activateRoute(label.route)"
+              @mouseenter.stop="activatePopoverNode(label.route.toId, label.route)"
+              @mouseleave.stop="clearPopoverNode(label.route)"
             >
               {{ label.toTitle }}
             </button>
@@ -236,6 +237,7 @@ const stageEl = ref(null);
 const stageSize = reactive({ width: 0, height: 0 });
 const activeNodeId = ref('');
 const activeEdgeId = ref('');
+const popoverNodeId = ref('');
 const editingTileId = ref('');
 const tileDraft = reactive({ title: '', bodyDelta: '', bodyHtml: '', fallbackText: '' });
 const tileImageResizeBar = reactive({ visible: false, top: 0, left: 0, imageEl: null });
@@ -277,9 +279,8 @@ const ROUTE_MASK_CARD_BLEED = 0;
 const ROUTE_MASK_CARD_BORDER_RADIUS = 13;
 const ROUTE_CORNER_RADIUS = 9;
 const SAME_GROUP_ROUTE_PADDING = 24;
-/** Scales down lane offsets for same-group routes because tile-to-tile gaps are already narrow. */
-const SAME_GROUP_LANE_FACTOR = 0.8;
 const LANE_STEP = 12;
+const SAME_GROUP_LANE_STEP = 24;
 const LABEL_DEFAULT_OFFSET = 12;
 const LABEL_STACK_STEP = 18;
 const LABEL_COLLISION_GAP = 8;
@@ -811,6 +812,22 @@ function distributeOffset(index, count, step = ENDPOINT_STEP) {
   return (index - (count - 1) / 2) * step;
 }
 
+function laneGroupKey(plan) {
+  if (plan.groupDistance !== 0) return '';
+  if (plan.axis === 'y') return `y:${plan.from.groupIndex}`;
+  if (plan.axis === 'x') return `x:${plan.from.groupIndex}`;
+  if (plan.axis === 'overflow') {
+    return `overflow:${plan.from.groupIndex}:${plan.startSide}`;
+  }
+  return '';
+}
+
+function laneSortValue(plan) {
+  const from = rectCenter(plan.from);
+  const to = rectCenter(plan.to);
+  return plan.axis === 'x' ? (from.x + to.x) / 2 : (from.y + to.y) / 2;
+}
+
 /**
  * Builds an SVG path from axis-aligned points and rounds each turn with a quadratic curve.
  */
@@ -1136,6 +1153,25 @@ const routedEdges = computed(() => {
       });
   }
 
+  const sameGroupLaneOffsets = new Map();
+  const sameGroupLaneGroups = new Map();
+  for (const plan of plans) {
+    const key = laneGroupKey(plan);
+    if (!key) continue;
+    if (!sameGroupLaneGroups.has(key)) sameGroupLaneGroups.set(key, []);
+    sameGroupLaneGroups.get(key).push({
+      id: plan.edge.id,
+      sortKey: laneSortValue(plan),
+    });
+  }
+  for (const routes of sameGroupLaneGroups.values()) {
+    routes
+      .sort((a, b) => a.sortKey - b.sortKey || a.id.localeCompare(b.id))
+      .forEach((route, index) => {
+        sameGroupLaneOffsets.set(route.id, distributeOffset(index, routes.length, SAME_GROUP_LANE_STEP));
+      });
+  }
+
   return plans.map(plan => {
     const { edge, from, to, groupDistance } = plan;
     const startOffset = endpointOffsets.get(`${edge.id}:start`) || 0;
@@ -1172,13 +1208,13 @@ const routedEdges = computed(() => {
     } else if (plan.axis === 'y') {
       const top = plan.startSide === 'bottom' ? from.y + from.height : to.y + to.height;
       const bottom = plan.startSide === 'bottom' ? to.y : from.y;
-      const laneOffset = (endpointOffsets.get(`${edge.id}:start`) || 0) * SAME_GROUP_LANE_FACTOR;
+      const laneOffset = sameGroupLaneOffsets.get(edge.id) || 0;
       const midY = (top + bottom) / 2 + laneOffset;
       points = [start, { x: start.x, y: midY }, { x: end.x, y: midY }, end];
     } else if (plan.axis === 'x') {
       const left = plan.startSide === 'right' ? from.x + from.width : to.x + to.width;
       const right = plan.startSide === 'right' ? to.x : from.x;
-      const laneOffset = (endpointOffsets.get(`${edge.id}:start`) || 0) * SAME_GROUP_LANE_FACTOR;
+      const laneOffset = sameGroupLaneOffsets.get(edge.id) || 0;
       const midX = (left + right) / 2 + laneOffset;
       points = createVerticalBendPoints(start, end, midX);
     } else {
@@ -1186,7 +1222,7 @@ const routedEdges = computed(() => {
       const rawMidX = routeOnRight
         ? Math.max(from.x + from.width, to.x + to.width) + SAME_GROUP_ROUTE_PADDING
         : Math.min(from.x, to.x) - SAME_GROUP_ROUTE_PADDING;
-      const laneOffset = endpointOffsets.get(`${edge.id}:start`) || 0;
+      const laneOffset = sameGroupLaneOffsets.get(edge.id) || 0;
       const midX = clamp(rawMidX + (routeOnRight ? laneOffset : -laneOffset), ROUTE_EDGE_PADDING, stageSize.width - ROUTE_EDGE_PADDING);
       points = createVerticalBendPoints(start, end, midX);
     }
@@ -1533,9 +1569,20 @@ function activateRoute(route) {
   activeNodeId.value = '';
 }
 
+function activatePopoverNode(nodeId, route) {
+  popoverNodeId.value = nodeId;
+  activateRoute(route);
+}
+
+function clearPopoverNode(route) {
+  popoverNodeId.value = '';
+  activateRoute(route);
+}
+
 function clearHighlight() {
   activeNodeId.value = '';
   activeEdgeId.value = '';
+  popoverNodeId.value = '';
 }
 
 function clearHighlightIfFocusLeaves(event) {
@@ -1560,6 +1607,10 @@ function isTileActive(tileId) {
   }
   if (!activeNodeId.value) return false;
   return routedEdges.value.some(route => routeTouchesActiveNode(route) && (route.fromId === tileId || route.toId === tileId));
+}
+
+function isPopoverTarget(tileId) {
+  return !!tileId && popoverNodeId.value === tileId;
 }
 
 function updateStageSize() {
