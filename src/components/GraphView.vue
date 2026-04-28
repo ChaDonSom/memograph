@@ -2,11 +2,11 @@
   <div class="memo-graph-view">
     <div class="memo-graph-toolbar">
       <div>
-        <div class="memo-graph-kicker">Bounded block map</div>
-        <h2>Focused relationship masonry</h2>
+        <div class="memo-graph-kicker">{{ viewKicker }}</div>
+        <h2>{{ viewTitle }}</h2>
       </div>
       <div class="memo-graph-toolbar-summary">
-        {{ visibleTiles.length }} blocks · {{ routedEdges.length }} conduits
+        {{ toolbarSummary }}
       </div>
       <div class="memo-graph-toolbar-actions">
         <button class="btn btn-ghost" @click="$emit('add-relation')">+ Add relation</button>
@@ -218,6 +218,11 @@ const props = defineProps({
   nodes: { type: Array, required: true },
   edges: { type: Array, required: true },
   currentId: { type: String, default: '' },
+  variant: {
+    type: String,
+    default: 'graph',
+    validator: value => ['graph', 'treemap'].includes(value),
+  },
 });
 
 const emit = defineEmits(['navigate', 'add-relation', 'delete-page', 'update-page', 'edit-relation', 'delete-relation']);
@@ -245,6 +250,9 @@ const PERIMETER_ROUTE_LANE = 12;
 const MIN_SIDE_WIDTH = 150;
 const MIN_FOCUS_WIDTH = 210;
 const MAX_VISIBLE_TILES = 28;
+const TREEMAP_MAX_VISIBLE_TILES = 48;
+const TREEMAP_MAX_EDGES_TO_ROUTE = 96;
+const CURRENT_NODE_EDGE_PRIORITY_BOOST = 1000;
 const FOCUS_MIN_SCORE = 36;
 const HOP_DECAY = 0.58;
 const CONTENT_SCORE_CAP = 12;
@@ -252,6 +260,7 @@ const HTML_RICHNESS_SCORE_CAP = 10;
 const UNTITLED_PAGE_LABEL = '(untitled)';
 const ENDPOINT_STEP = 12;
 const FOCUS_SCORE_BOOST_RATIO = 1.08;
+const TREEMAP_CURRENT_SCORE_BOOST_RATIO = 1.16;
 // When the map has only a few blocks, lower the focus floor to 72% so two adjacent blocks can grow toward one third of the screen.
 const MIN_FOCUS_FALLBACK_RATIO = 0.72;
 const MIN_TILES_FOR_BALANCED_FOCUS = 3;
@@ -284,6 +293,10 @@ const ARROWHEAD_WIDTH = 10;
 const ROUTE_OBSTACLE_EPSILON = 0.01;
 const ROUTE_TURN_PENALTY = 14;
 const ROUTE_COORDINATE_PRECISION = 100;
+
+const isTreemapVariant = computed(() => props.variant === 'treemap');
+const viewKicker = computed(() => isTreemapVariant.value ? 'Block treemap' : 'Bounded block map');
+const viewTitle = computed(() => isTreemapVariant.value ? 'Relationship corridor treemap' : 'Focused relationship masonry');
 
 function clamp(value, min, max) {
   return Math.min(max, Math.max(min, value));
@@ -445,21 +458,66 @@ function focusedPScore(node) {
   if (!distance) return 0;
   if (node.id === props.currentId) return FOCUS_MIN_SCORE;
 
-  const stats = degreeStats.value.get(node.id) || { incoming: 0, outgoing: 0, weight: 0 };
-  const content = nodeContentStats.value.get(node.id) || { plainText: '', richness: 0 };
-  const contentLength = content.plainText.length;
-  const contentScore = clamp(Math.log2(contentLength + 1) * 1.45, 0, CONTENT_SCORE_CAP);
-  const richnessScore = content.richness;
-  const visitScore = Math.log2((node.visits || 0) + 1) * 1.8;
-  const degreeScore = Math.log2(stats.incoming + stats.outgoing + 1) * 3;
+  const scoreParts = nodeScoreParts(node);
   const directEdgeScore = distance.relationWeight * 2.6;
-  const existingPScore = bestExistingPScores.value.get(node.id) || 0;
 
-  return (directEdgeScore + contentScore + richnessScore + visitScore + degreeScore + existingPScore)
+  return (directEdgeScore
+    + scoreParts.contentScore
+    + scoreParts.richnessScore
+    + scoreParts.visitScore
+    + scoreParts.degreeScore
+    + scoreParts.existingPScore)
     * Math.pow(HOP_DECAY, Math.max(0, distance.hop - 1));
 }
 
+function nodeScoreParts(node) {
+  const stats = degreeStats.value.get(node.id) || { incoming: 0, outgoing: 0, weight: 0 };
+  const content = nodeContentStats.value.get(node.id) || { plainText: '', richness: 0 };
+  const contentScore = clamp(Math.log2(content.plainText.length + 1) * 1.45, 0, CONTENT_SCORE_CAP);
+  return {
+    stats,
+    contentScore,
+    richnessScore: content.richness,
+    visitScore: Math.log2((node.visits || 0) + 1) * 1.8,
+    degreeScore: Math.log2(stats.incoming + stats.outgoing + 1) * 3,
+    existingPScore: bestExistingPScores.value.get(node.id) || 0,
+  };
+}
+
+function compareTreemapModelsByScoreAndDate(a, b) {
+  return b.score - a.score || (b.node.updatedAt || 0) - (a.node.updatedAt || 0);
+}
+
+function capTreemapModels(models) {
+  if (models.length <= TREEMAP_MAX_VISIBLE_TILES) return models;
+
+  const sorted = [...models].sort(compareTreemapModelsByScoreAndDate);
+
+  const capped = sorted.slice(0, TREEMAP_MAX_VISIBLE_TILES);
+  if (props.currentId && !capped.some(model => model.node.id === props.currentId)) {
+    const current = sorted.find(model => model.node.id === props.currentId);
+    if (current) {
+      capped.pop();
+      const insertIndex = capped.findIndex(model => compareTreemapModelsByScoreAndDate(current, model) < 0);
+      if (insertIndex === -1) capped.push(current);
+      else capped.splice(insertIndex, 0, current);
+    }
+  }
+
+  return capped;
+}
+
 const visibleNodeModels = computed(() => {
+  if (isTreemapVariant.value) {
+    return capTreemapModels(props.nodes
+      .map(node => ({
+        node,
+        hop: node.id === props.currentId ? 0 : 1,
+        side: 'treemap',
+        score: treemapPScore(node),
+      })));
+  }
+
   const models = props.nodes
     .map(node => {
       const distance = focusedDistances.value.get(node.id);
@@ -493,6 +551,22 @@ const visibleNodeModels = computed(() => {
 
   return models;
 });
+
+const treemapNodeScores = computed(() =>
+  new Map(visibleNodeModels.value.map(model => [model.node.id, model.score]))
+);
+
+function treemapPScore(node) {
+  const scoreParts = nodeScoreParts(node);
+  const baseScore = 6
+    + scoreParts.contentScore
+    + scoreParts.richnessScore
+    + scoreParts.visitScore
+    + scoreParts.degreeScore
+    + scoreParts.stats.weight * 0.9
+    + scoreParts.existingPScore;
+  return node.id === props.currentId ? baseScore * TREEMAP_CURRENT_SCORE_BOOST_RATIO : baseScore;
+}
 
 function treemapGroup(models, bounds) {
   if (!models.length || bounds.width <= 0 || bounds.height <= 0) return [];
@@ -605,6 +679,21 @@ const layoutState = computed(() => {
   if (width <= 0 || height <= 0) return { models: [], corridors: [] };
 
   const models = visibleNodeModels.value;
+  if (isTreemapVariant.value) {
+    return {
+      models: treemapGroup(models, {
+        x: OUTER_PADDING,
+        y: OUTER_PADDING,
+        width,
+        height,
+        padding: internalTileGap(props.edges.length),
+        groupKey: 'treemap',
+        groupIndex: 0,
+      }),
+      corridors: [],
+    };
+  }
+
   const focus = models.find(model => model.node.id === props.currentId);
   if (!focus) return { models: [], corridors: [] };
 
@@ -677,6 +766,12 @@ const layoutModels = computed(() => layoutState.value.models);
 const routeCorridors = computed(() => layoutState.value.corridors);
 
 function roleLabel(model) {
+  if (isTreemapVariant.value) {
+    if (model.node.id === props.currentId) return 'Current page';
+    const stats = degreeStats.value.get(model.node.id) || { incoming: 0, outgoing: 0 };
+    const count = stats.incoming + stats.outgoing;
+    return `${count} relation${count === 1 ? '' : 's'}`;
+  }
   if (model.node.id === props.currentId) return 'Focused page';
   if (model.hop > 1) return `${model.hop} hops ${model.side === 'incoming' ? 'in' : 'out'}`;
   return model.side === 'incoming' ? 'Incoming' : 'Outgoing';
@@ -719,10 +814,63 @@ const tileRects = computed(() =>
   new Map(visibleTiles.value.map(tile => [tile.id, tile.rect]))
 );
 
-const visibleEdges = computed(() =>
+const eligibleVisibleEdges = computed(() =>
   props.edges
     .filter(edge => tileRects.value.has(edge.fromId) && tileRects.value.has(edge.toId))
 );
+
+function treemapEdgeRoutingScore(edge) {
+  const touchesCurrent = edge.fromId === props.currentId || edge.toId === props.currentId;
+  const fromScore = treemapNodeScores.value.get(edge.fromId) || 0;
+  const toScore = treemapNodeScores.value.get(edge.toId) || 0;
+  return (touchesCurrent ? CURRENT_NODE_EDGE_PRIORITY_BOOST : 0)
+    + (edge.weight || DEFAULT_EDGE_WEIGHT) * 10
+    + Math.max(fromScore, toScore);
+}
+
+function insertTreemapEdgeCandidate(candidates, candidate) {
+  const insertIndex = candidates.findIndex(item => candidate.score > item.score);
+  if (insertIndex === -1) candidates.push(candidate);
+  else candidates.splice(insertIndex, 0, candidate);
+}
+
+function topTreemapEdgesToRoute(edges) {
+  const candidates = [];
+  for (const edge of edges) {
+    const candidate = { edge, score: treemapEdgeRoutingScore(edge) };
+    if (candidates.length < TREEMAP_MAX_EDGES_TO_ROUTE) {
+      insertTreemapEdgeCandidate(candidates, candidate);
+    } else if (candidate.score >= candidates[candidates.length - 1].score) {
+      candidates.pop();
+      insertTreemapEdgeCandidate(candidates, candidate);
+    }
+  }
+  return candidates.map(({ edge }) => edge);
+}
+
+const visibleEdges = computed(() => {
+  const edges = eligibleVisibleEdges.value;
+  if (!isTreemapVariant.value || edges.length <= TREEMAP_MAX_EDGES_TO_ROUTE) return edges;
+
+  return topTreemapEdgesToRoute(edges);
+});
+
+const visibleTileCount = computed(() => visibleTiles.value.length);
+const routedEdgeCount = computed(() => routedEdges.value.length);
+const eligibleVisibleEdgeCount = computed(() => eligibleVisibleEdges.value.length);
+const totalNodeCount = computed(() => props.nodes.length);
+
+const toolbarSummary = computed(() => {
+  if (!isTreemapVariant.value) return `${visibleTileCount.value} blocks · ${routedEdgeCount.value} conduits`;
+
+  const blocks = totalNodeCount.value > visibleTileCount.value
+    ? `${visibleTileCount.value} / ${totalNodeCount.value} blocks`
+    : `${visibleTileCount.value} blocks`;
+  const conduits = eligibleVisibleEdgeCount.value > routedEdgeCount.value
+    ? `${routedEdgeCount.value} / ${eligibleVisibleEdgeCount.value} conduits`
+    : `${routedEdgeCount.value} conduits`;
+  return `${blocks} · ${conduits}`;
+});
 
 function rectCenter(rect) {
   return {
