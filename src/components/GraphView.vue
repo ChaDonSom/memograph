@@ -183,7 +183,27 @@
           {{ label.label }}
         </button>
         <div class="memo-map-route-popover">
-          <div class="memo-map-route-popover-title">{{ label.label }}</div>
+          <div class="memo-map-route-popover-title">
+            <button
+              type="button"
+              class="memo-map-route-popover-link"
+              @click.stop="focusRouteNode(label.route.fromId)"
+              @mouseenter.stop="activateNode(label.route.fromId)"
+              @mouseleave.stop="activateRoute(label.route)"
+            >
+              {{ label.fromTitle }}
+            </button>
+            <span>{{ label.label }}</span>
+            <button
+              type="button"
+              class="memo-map-route-popover-link"
+              @click.stop="focusRouteNode(label.route.toId)"
+              @mouseenter.stop="activateNode(label.route.toId)"
+              @mouseleave.stop="activateRoute(label.route)"
+            >
+              {{ label.toTitle }}
+            </button>
+          </div>
           <div class="memo-map-route-popover-body" v-html="label.bodyHtml"></div>
           <div class="memo-map-route-popover-actions">
             <button class="btn btn-ghost" @click.stop="$emit('edit-relation', label.edge)">Edit relation</button>
@@ -252,7 +272,7 @@ const TILE_MAX_FONT_SIZE = 16;
 const MIN_VERTICAL_LABEL_LENGTH = 60;
 const ROUTE_EDGE_PADDING = 18;
 const ROUTE_CARD_CLEARANCE = 14;
-const ROUTE_MASK_CARD_BLEED = 1;
+const ROUTE_MASK_CARD_BLEED = 0;
 const ROUTE_MASK_CARD_BORDER_RADIUS = 13;
 const ROUTE_CORNER_RADIUS = 9;
 const SAME_GROUP_ROUTE_PADDING = 24;
@@ -271,12 +291,6 @@ const LABEL_PLACEMENT_MAX_ATTEMPTS = 8;
 const ROUTE_HIT_PADDING = 10;
 const ARROWHEAD_LENGTH = 12;
 const ARROWHEAD_WIDTH = 10;
-const ARROWHEAD_ENDPOINT_GAP = 2;
-const ARROWHEAD_COLLISION_STEP = 14;
-const ARROWHEAD_LABEL_RADIUS = 28;
-const ARROWHEAD_PLACEMENT_MAX_ATTEMPTS = 6;
-const ARROWHEAD_SNAP_GRID = 4;
-const MIN_SEGMENT_LENGTH = 1;
 const ROUTE_OBSTACLE_EPSILON = 0.01;
 const ROUTE_TURN_PENALTY = 14;
 const ROUTE_COORDINATE_PRECISION = 100;
@@ -752,6 +766,19 @@ function pointOutsideRect(rect, side, offset) {
   };
 }
 
+function pointOnRectSide(rect, side, offset) {
+  if (side === 'left' || side === 'right') {
+    return {
+      x: side === 'left' ? rect.x : rect.x + rect.width,
+      y: clamp(rectCenter(rect).y + offset, rect.y + ROUTE_EDGE_PADDING, rect.y + rect.height - ROUTE_EDGE_PADDING),
+    };
+  }
+  return {
+    x: clamp(rectCenter(rect).x + offset, rect.x + ROUTE_EDGE_PADDING, rect.x + rect.width - ROUTE_EDGE_PADDING),
+    y: side === 'top' ? rect.y : rect.y + rect.height,
+  };
+}
+
 function adjacentCorridorBetween(from, to) {
   const lowerGroupIndex = Math.min(from.groupIndex, to.groupIndex);
   return routeCorridors.value[lowerGroupIndex] || null;
@@ -787,12 +814,17 @@ function distributeOffset(index, count, step = ENDPOINT_STEP) {
  * Builds an SVG path from axis-aligned points and rounds each turn with a quadratic curve.
  */
 function roundedOrthogonalPath(points) {
+  points = compactOrthogonalPoints(points);
   if (points.length < 2) return '';
   const commands = [`M ${points[0].x} ${points[0].y}`];
   for (let i = 1; i < points.length - 1; i++) {
     const prev = points[i - 1];
     const current = points[i];
     const next = points[i + 1];
+    if ((prev.x === current.x && current.x === next.x)
+      || (prev.y === current.y && current.y === next.y)) {
+      continue;
+    }
     const incomingDistance = Math.abs(current.x - prev.x) + Math.abs(current.y - prev.y);
     const outgoingDistance = Math.abs(next.x - current.x) + Math.abs(next.y - current.y);
     const radius = Math.min(ROUTE_CORNER_RADIUS, incomingDistance / 2, outgoingDistance / 2);
@@ -1109,8 +1141,12 @@ const routedEdges = computed(() => {
 
   return plans.map(plan => {
     const { edge, from, to, groupDistance } = plan;
-    const start = pointOutsideRect(from, plan.startSide, endpointOffsets.get(`${edge.id}:start`) || 0);
-    const end = pointOutsideRect(to, plan.endSide, endpointOffsets.get(`${edge.id}:end`) || 0);
+    const startOffset = endpointOffsets.get(`${edge.id}:start`) || 0;
+    const endOffset = endpointOffsets.get(`${edge.id}:end`) || 0;
+    const startPort = pointOnRectSide(from, plan.startSide, startOffset);
+    const endPort = pointOnRectSide(to, plan.endSide, endOffset);
+    const start = pointOutsideRect(from, plan.startSide, startOffset);
+    const end = pointOutsideRect(to, plan.endSide, endOffset);
     let points = [];
     if (groupDistance === 1) {
       const corridor = adjacentCorridorBetween(from, to);
@@ -1160,16 +1196,22 @@ const routedEdges = computed(() => {
 
     const strokeWidth = 1.1 + Math.min(1.8, (edge.weight || DEFAULT_EDGE_WEIGHT) / 8);
     points = findClearOrthogonalRoute(points);
+    points = [
+      routePoint(startPort),
+      ...points,
+      routePoint(endPort),
+    ];
     return {
       id: edge.id,
       edge,
       fromId: edge.fromId,
       toId: edge.toId,
+      endSide: plan.endSide,
       points,
-      startX: start.x,
-      startY: start.y,
-      endX: end.x,
-      endY: end.y,
+      startX: startPort.x,
+      startY: startPort.y,
+      endX: endPort.x,
+      endY: endPort.y,
       path: roundedOrthogonalPath(points),
       label: relationLabel(edge),
       bodyHtml: relationBodyHtml(edge),
@@ -1267,6 +1309,8 @@ const routeLabels = computed(() => {
       bodyHtml: route.bodyHtml,
       route,
       edge: route.edge,
+      fromTitle: nodesById.value.get(route.fromId)?.title || '(untitled)',
+      toTitle: nodesById.value.get(route.toId)?.title || '(untitled)',
       vertical: placement.vertical,
       rotation: placement.rotation,
       x: placement.x,
@@ -1299,55 +1343,6 @@ const routeLabels = computed(() => {
 });
 
 /**
- * Calculates Euclidean distance between points shaped as { x, y }.
- * @param {{ x: number, y: number }} a
- * @param {{ x: number, y: number }} b
- * @returns {number}
- */
-function distanceBetweenPoints(a, b) {
-  return Math.hypot(a.x - b.x, a.y - b.y);
-}
-
-/**
- * Finds a point and direction along a route at a fixed distance back from its end.
- */
-function pointBackAlongRoute(points, distanceFromEnd) {
-  let remaining = distanceFromEnd;
-  for (let index = points.length - 1; index > 0; index--) {
-    const end = points[index];
-    const start = points[index - 1];
-    const length = distanceBetweenPoints(start, end);
-    if (length <= 0) continue;
-    if (remaining <= length) {
-      const ratio = remaining / length;
-      // Interpolate from the route end toward the segment start to move back along the path.
-      return {
-        x: end.x + (start.x - end.x) * ratio,
-        y: end.y + (start.y - end.y) * ratio,
-        unit: {
-          x: (end.x - start.x) / length,
-          y: (end.y - start.y) / length,
-        },
-      };
-    }
-    remaining -= length;
-  }
-
-  const start = points[0];
-  const end = points[points.length - 1];
-  // Degenerate routes can collapse to one point while layout is resizing; keep direction math finite.
-  const length = Math.max(MIN_SEGMENT_LENGTH, distanceBetweenPoints(start, end));
-  return {
-    x: end.x,
-    y: end.y,
-    unit: {
-      x: (end.x - start.x) / length,
-      y: (end.y - start.y) / length,
-    },
-  };
-}
-
-/**
  * Builds SVG polygon points for an arrowhead tip at point, facing along unit.
  */
 function arrowheadPolygon(point, unit) {
@@ -1367,41 +1362,32 @@ function arrowheadPolygon(point, unit) {
   return `${point.x},${point.y} ${left.x},${left.y} ${right.x},${right.y}`;
 }
 
-/**
- * Snaps arrow endpoint coordinates to a small grid so nearby arrowheads share a collision group.
- * @param {number} value
- * @returns {number}
- */
-function quantizeArrowheadEndpoint(value) {
-  return Math.round(value / ARROWHEAD_SNAP_GRID) * ARROWHEAD_SNAP_GRID;
+function arrowUnitForEndSide(side) {
+  return {
+    left: { x: 1, y: 0 },
+    right: { x: -1, y: 0 },
+    top: { x: 0, y: 1 },
+    bottom: { x: 0, y: -1 },
+  }[side] || { x: 1, y: 0 };
 }
 
-const routeArrowheads = computed(() => {
-  const placedByEndpoint = new Map();
-  const labels = routeLabels.value.map(label => ({ x: label.x, y: label.y }));
-  return routedEdges.value.map(route => {
-    const endpointKey = `${quantizeArrowheadEndpoint(route.endX)}:${quantizeArrowheadEndpoint(route.endY)}`;
-    const endpointCount = placedByEndpoint.get(endpointKey) || 0;
-    placedByEndpoint.set(endpointKey, endpointCount + 1);
-    let distanceFromEnd = ARROWHEAD_ENDPOINT_GAP + endpointCount * ARROWHEAD_COLLISION_STEP;
-    let placement = pointBackAlongRoute(route.points, distanceFromEnd);
-    while (
-      labels.some(label => distanceBetweenPoints(label, placement) < ARROWHEAD_LABEL_RADIUS)
-      && distanceFromEnd < ARROWHEAD_ENDPOINT_GAP + ARROWHEAD_COLLISION_STEP * ARROWHEAD_PLACEMENT_MAX_ATTEMPTS
-    ) {
-      distanceFromEnd += ARROWHEAD_COLLISION_STEP;
-      placement = pointBackAlongRoute(route.points, distanceFromEnd);
-    }
+const routeArrowheads = computed(() =>
+  routedEdges.value.map(route => {
+    const tip = route.points[route.points.length - 1];
     return {
       id: route.id,
       route,
-      points: arrowheadPolygon(placement, placement.unit),
+      points: arrowheadPolygon(tip, arrowUnitForEndSide(route.endSide)),
     };
-  });
-});
+  })
+);
 
 function handleTileClick(tile) {
   if (tile.id !== props.currentId) emit('navigate', tile.id);
+}
+
+function focusRouteNode(nodeId) {
+  if (nodeId && nodeId !== props.currentId) emit('navigate', nodeId);
 }
 
 function handleTileKeydown(event, tile) {

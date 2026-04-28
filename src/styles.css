@@ -1143,6 +1143,25 @@ body {
   margin-bottom: 8px;
 }
 
+.memo-map-route-popover-link {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  color: var(--accent);
+  cursor: pointer;
+  font: inherit;
+  font-weight: 800;
+  padding: 0;
+  text-align: left;
+}
+
+.memo-map-route-popover-link:hover,
+.memo-map-route-popover-link:focus-visible {
+  color: var(--text);
+  text-decoration: underline;
+  outline: none;
+}
+
 .memo-map-route-popover-body {
   max-height: 180px;
   overflow: auto;
