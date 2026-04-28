@@ -119,7 +119,7 @@ const MAX_VISIBLE_TILES = 28;
 const FOCUS_MIN_SCORE = 36;
 const HOP_DECAY = 0.58;
 const CONTENT_SCORE_CAP = 12;
-const RICHNESS_SCORE_CAP = 10;
+const HTML_RICHNESS_SCORE_CAP = 10;
 const ENDPOINT_STEP = 12;
 const FOCUS_SCORE_BOOST_RATIO = 1.08;
 // When the map has only a few blocks, lower the focus floor to 72% so two adjacent blocks can grow toward one third of the screen.
@@ -161,7 +161,7 @@ function richnessFromHtml(html) {
   const headingScore = (html.match(/<h[1-6]\b/gi)?.length || 0) * 1.6;
   const listScore = (html.match(/<(ul|ol|li)\b/gi)?.length || 0) * 0.7;
   const emphasisScore = (html.match(/<(strong|em|blockquote|pre|a)\b/gi)?.length || 0) * 0.8;
-  return clamp(imageScore + headingScore + listScore + emphasisScore, 0, RICHNESS_SCORE_CAP);
+  return clamp(imageScore + headingScore + listScore + emphasisScore, 0, HTML_RICHNESS_SCORE_CAP);
 }
 
 function relationLabel(edge) {
@@ -321,6 +321,43 @@ function treemapGroup(models, bounds) {
   }));
 }
 
+function groupWeight(group) {
+  return Math.max(1, group.value);
+}
+
+function groupMinWidth(group, availableWidth) {
+  return group.key === 'focus'
+    ? Math.min(MIN_FOCUS_WIDTH, availableWidth)
+    : Math.min(MIN_SIDE_WIDTH, availableWidth);
+}
+
+function allocateGroupWidths(groups, availableWidth) {
+  const totalValue = groups.reduce((sum, group) => sum + groupWeight(group), 0);
+  let remainingWidth = availableWidth;
+  let remainingValue = totalValue;
+  const widths = new Map();
+
+  for (const group of groups) {
+    const minWidth = groupMinWidth(group, availableWidth);
+    const idealWidth = availableWidth * (groupWeight(group) / totalValue);
+    if (idealWidth < minWidth && groups.length > 1) {
+      widths.set(group.key, minWidth);
+      remainingWidth -= minWidth;
+      remainingValue -= groupWeight(group);
+    }
+  }
+
+  for (const group of groups) {
+    if (widths.has(group.key)) continue;
+    const widthShare = remainingValue > 0
+      ? remainingWidth * (groupWeight(group) / remainingValue)
+      : remainingWidth / groups.length;
+    widths.set(group.key, Math.max(1, widthShare));
+  }
+
+  return widths;
+}
+
 const layoutModels = computed(() => {
   const width = stageSize.width - OUTER_PADDING * 2;
   const height = stageSize.height - OUTER_PADDING * 2;
@@ -340,33 +377,8 @@ const layoutModels = computed(() => {
 
   const gapTotal = CONDUIT_GAP * Math.max(0, groups.length - 1);
   const availableWidth = width - gapTotal;
-  const totalValue = groups.reduce((sum, group) => sum + Math.max(1, group.value), 0);
-  const minWidths = new Map(groups.map(group => [
-    group.key,
-    group.key === 'focus' ? Math.min(MIN_FOCUS_WIDTH, availableWidth) : Math.min(MIN_SIDE_WIDTH, availableWidth),
-  ]));
-  let remainingWidth = availableWidth;
-  let remainingValue = totalValue;
-  const widths = new Map();
-
   // For multiple groups, enforce minimum widths to preserve readable columns; single-group layouts fill the stage naturally.
-  for (const group of groups) {
-    const minWidth = minWidths.get(group.key);
-    const idealWidth = availableWidth * (Math.max(1, group.value) / totalValue);
-    if (idealWidth < minWidth && groups.length > 1) {
-      widths.set(group.key, minWidth);
-      remainingWidth -= minWidth;
-      remainingValue -= Math.max(1, group.value);
-    }
-  }
-
-  for (const group of groups) {
-    if (widths.has(group.key)) continue;
-    const widthShare = remainingValue > 0
-      ? remainingWidth * (Math.max(1, group.value) / remainingValue)
-      : remainingWidth / groups.length;
-    widths.set(group.key, Math.max(1, widthShare));
-  }
+  const widths = allocateGroupWidths(groups, availableWidth);
 
   let x = OUTER_PADDING;
   const laidOut = [];
@@ -474,6 +486,11 @@ function routePath(points) {
   return `M ${points.startX} ${points.startY} H ${points.midX} V ${points.endY} H ${points.endX}`;
 }
 
+function labelRotation(vertical, startY, endY) {
+  if (!vertical) return 0;
+  return endY < startY ? -90 : 90;
+}
+
 const routedEdges = computed(() => {
   const counts = new Map();
   const indexes = new Map();
@@ -510,7 +527,7 @@ const routeLabels = computed(() =>
     const horizontalLength = Math.abs(route.endX - route.startX);
     const vertical = verticalLength > MIN_VERTICAL_LABEL_LENGTH
       && verticalLength > horizontalLength * VERTICAL_LABEL_MIN_ASPECT_RATIO;
-    const rotation = vertical ? (route.endY < route.startY ? -90 : 90) : 0;
+    const rotation = labelRotation(vertical, route.startY, route.endY);
     const x = vertical ? route.midX : (route.startX + route.endX) / 2;
     const y = vertical ? (route.startY + route.endY) / 2 : route.endY - 12;
     return {
