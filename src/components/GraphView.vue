@@ -802,19 +802,20 @@ function routePoint(point) {
 }
 
 function routeGridLines(start, end, preferredPoints, obstacles) {
+  const validPreferredPoints = preferredPoints.filter(point => Number.isFinite(point?.x) && Number.isFinite(point?.y));
   const xLines = [
     ROUTE_EDGE_PADDING,
     stageSize.width - ROUTE_EDGE_PADDING,
     start.x,
     end.x,
-    ...preferredPoints.map(point => point.x),
+    ...validPreferredPoints.map(point => point.x),
   ];
   const yLines = [
     PERIMETER_ROUTE_LANE,
     stageSize.height - PERIMETER_ROUTE_LANE,
     start.y,
     end.y,
-    ...preferredPoints.map(point => point.y),
+    ...validPreferredPoints.map(point => point.y),
   ];
   for (const rect of obstacles) {
     xLines.push(rect.x - ROUTE_CARD_CLEARANCE, rect.x + rect.width + ROUTE_CARD_CLEARANCE);
@@ -903,6 +904,7 @@ function findClearOrthogonalRoute(points) {
   const distances = new Map();
   const previous = new Map();
   const queue = [];
+  // Search states are encoded as "x,y|previousAxis" so the same grid point can be reached with different turn costs.
   const startState = `${nodeKey(start.x, start.y)}|none`;
   distances.set(startState, 0);
   enqueueRouteState(queue, { state: startState, cost: 0 });
