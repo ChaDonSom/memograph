@@ -3,7 +3,7 @@ export default {}
 </script>
 <script setup lang="ts">
 import { useElementSize } from "@vueuse/core"
-import { hierarchy, treemap, treemapSquarify } from "d3-hierarchy"
+import { hierarchy, treemap, treemapDice, treemapSlice, treemapSquarify } from "d3-hierarchy"
 import { computed, ref } from "vue"
 
 const props = defineProps<{
@@ -21,6 +21,35 @@ const GUTTER = 4
 // `1` would mean perfect squares; `1.18` gently nudges the layout toward squarer tiles
 // than D3's default golden-ratio setting without forcing every tile to be square.
 const TREEMAP_ASPECT_RATIO = 1.18
+const FEATURED_COUNT = 3
+
+const squarifyTile = treemapSquarify.ratio(TREEMAP_ASPECT_RATIO)
+
+function reorderFeaturedNodes(nodes: any[]) {
+  if (nodes.length !== 3) return nodes
+  return [nodes[1], nodes[0], nodes[2]]
+}
+
+function featuredTreemapTile(node: any, x0: number, y0: number, x1: number, y1: number) {
+  if (!node.children?.length) return
+
+  // Depth 0 is our synthetic root with exactly two children: `featured` and `rest`.
+  // `treemapSlice` stacks those groups top-to-bottom, which guarantees the featured band stays high.
+  if (node.depth === 0) {
+    treemapSlice(node, x0, y0, x1, y1)
+    return
+  }
+
+  // Inside the featured band we lay the three highlighted tiles left-to-right.
+  // Because we reorder them as [2nd, 1st, 3rd], the biggest tile lands in the middle.
+  if (node.data.groupKey === "featured") {
+    treemapDice(node, x0, y0, x1, y1)
+    return
+  }
+
+  // Everything else can use the normal squarified layout.
+  squarifyTile(node, x0, y0, x1, y1)
+}
 
 const nodesWithPositions = computed(() => {
   // `useElementSize` can report fractional values; D3 layout is easier to reason about
@@ -29,24 +58,41 @@ const nodesWithPositions = computed(() => {
   const height = Math.max(0, Math.floor(Number(mainRefSize.height.value)))
   if (!props.nodes.length || width <= 0 || height <= 0) return []
 
+  const sortedNodes = [...props.nodes].sort((a, b) => (Number(b.visits) || 0) - (Number(a.visits) || 0))
+  const featuredNodes = reorderFeaturedNodes(sortedNodes.slice(0, FEATURED_COUNT))
+  const remainingNodes = sortedNodes.slice(FEATURED_COUNT)
+  const groups = [
+    {
+      groupKey: "featured",
+      children: featuredNodes,
+    },
+    {
+      groupKey: "rest",
+      children: remainingNodes,
+    },
+  ].filter((group) => group.children.length)
+
   // D3 treemap expects one hierarchy root, even if our data is really just a flat list.
-  // We create a synthetic parent with each note as a child leaf.
+  // We create a synthetic parent and split the notes into two groups:
+  // a featured strip for the biggest few nodes, and a remainder group below it.
   const root = hierarchy({
-    children: props.nodes.map((node) => ({
-      ...node,
-      // Treemap area is proportional to `value`.
-      // We clamp to at least `1` so a node with `0` visits does not collapse into a 0x0 tile.
-      value: Math.max(1, Number(node.visits) || 0),
+    children: groups.map((group) => ({
+      groupKey: group.groupKey,
+      children: group.children.map((node) => ({
+        ...node,
+        // Treemap area is proportional to `value`.
+        // We clamp to at least `1` so a node with `0` visits does not collapse into a 0x0 tile.
+        value: Math.max(1, Number(node.visits) || 0),
+      })),
     })),
     // `sum(...)` is required before running the layout: D3 walks the tree bottom-up and
     // stores the aggregate value each rectangle should represent.
   }).sum((item: any) => item.value || 0)
 
   treemap<any>()
-    // `treemapSquarify` is the strip-based treemap algorithm.
-    // Instead of alternating raw horizontal/vertical cuts, it groups siblings into strips
-    // that try to keep rectangles readable and not too skinny.
-    .tile(treemapSquarify.ratio(TREEMAP_ASPECT_RATIO))
+    // The root uses a custom tiler so the biggest few nodes occupy a dedicated top strip.
+    // The remainder still uses squarified packing inside its own region.
+    .tile(featuredTreemapTile)
     .size([width, height])
     // Inner padding adds spacing only between sibling tiles, not around the outer edge.
     .paddingInner(GUTTER)
