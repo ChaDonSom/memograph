@@ -106,18 +106,8 @@
           <span>{{ tile.roleLabel }}</span>
           <span>P={{ tile.scoreLabel }}</span>
         </span>
-        <form
-          v-if="editingTileId === tile.id"
-          class="memo-map-tile-editor"
-          @click.stop
-          @submit.prevent="saveTileEdit"
-        >
-          <input
-            v-model="tileDraft.title"
-            class="memo-map-tile-title-input"
-            placeholder="Page title…"
-            @keydown.stop
-          />
+        <form v-if="editingTileId === tile.id" class="memo-map-tile-editor" @click.stop @submit.prevent="saveTileEdit">
+          <input v-model="tileDraft.title" class="memo-map-tile-title-input" placeholder="Page title…" @keydown.stop />
           <div class="memo-map-tile-rich-editor" @keydown.stop>
             <div :ref="setTileEditorHost"></div>
             <div
@@ -139,18 +129,28 @@
         </form>
         <template v-else>
           <span class="memo-map-tile-title">{{ tile.title }}</span>
-          <span
-            v-if="tile.bodyHtml"
-            class="memo-map-tile-body rel-rich"
-            v-html="tile.bodyHtml"
-          ></span>
-          <span v-else class="memo-map-tile-body memo-map-tile-body--empty">
-            No page details yet.
-          </span>
+          <span v-if="tile.bodyHtml" class="memo-map-tile-body rel-rich" v-html="tile.bodyHtml"></span>
+          <span v-else class="memo-map-tile-body memo-map-tile-body--empty"> No page details yet. </span>
           <span class="memo-map-tile-meta">{{ tile.meta }}</span>
           <span class="memo-map-tile-actions" @click.stop>
-            <button type="button" class="memo-map-action" :aria-label="`Edit ${tile.title}`" @click="startTileEdit(tile)" @keydown.stop>Edit page</button>
-            <button type="button" class="memo-map-action memo-map-action--danger" :aria-label="`Delete ${tile.title}`" @click="$emit('delete-page', tile.id)" @keydown.stop>Delete page</button>
+            <button
+              type="button"
+              class="memo-map-action"
+              :aria-label="`Edit ${tile.title}`"
+              @click="startTileEdit(tile)"
+              @keydown.stop
+            >
+              Edit page
+            </button>
+            <button
+              type="button"
+              class="memo-map-action memo-map-action--danger"
+              :aria-label="`Delete ${tile.title}`"
+              @click="$emit('delete-page', tile.id)"
+              @keydown.stop
+            >
+              Delete page
+            </button>
           </span>
         </template>
       </div>
@@ -206,274 +206,315 @@
 </template>
 
 <script setup>
-import { hierarchy, treemap, treemapSquarify } from 'd3-hierarchy';
-import Quill from 'quill';
-import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue';
-import { DEFAULT_EDGE_WEIGHT, pScore, timeAgo } from '../utils/scoring.js';
-import { imageUploadHandler } from '../utils/imageCompression.js';
-import { normalizeEditorHtml, RICH_CONTENT_TOOLBAR, sanitizeRichDelta, sanitizeRichHtml } from '../utils/sanitize.js';
-import { richTextFirstLine, truncateText } from '../utils/text.js';
+import { hierarchy, treemap, treemapSquarify } from "d3-hierarchy"
+import Quill from "quill"
+import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue"
+import { DEFAULT_EDGE_WEIGHT, pScore, timeAgo } from "../utils/scoring.js"
+import { imageUploadHandler } from "../utils/imageCompression.js"
+import { normalizeEditorHtml, RICH_CONTENT_TOOLBAR, sanitizeRichDelta, sanitizeRichHtml } from "../utils/sanitize.js"
+import { richTextFirstLine, truncateText } from "../utils/text.js"
 
 const props = defineProps({
   nodes: { type: Array, required: true },
   edges: { type: Array, required: true },
-  currentId: { type: String, default: '' },
+  currentId: { type: String, default: "" },
   variant: {
     type: String,
-    default: 'graph',
-    validator: value => ['graph', 'treemap'].includes(value),
+    default: "graph",
+    validator: (value) => ["graph", "treemap", "myTreemap"].includes(value),
   },
-});
+})
 
-const emit = defineEmits(['navigate', 'add-relation', 'delete-page', 'update-page', 'edit-relation', 'delete-relation']);
+const emit = defineEmits(["navigate", "add-relation", "delete-page", "update-page", "edit-relation", "delete-relation"])
 
-const stageEl = ref(null);
-const stageSize = reactive({ width: 0, height: 0 });
-const activeNodeId = ref('');
-const activeEdgeId = ref('');
-const popoverNodeId = ref('');
-const editingTileId = ref('');
-const tileDraft = reactive({ title: '', bodyDelta: '', bodyHtml: '', fallbackText: '' });
-const tileImageResizeBar = reactive({ visible: false, top: 0, left: 0, imageEl: null });
-let resizeObserver = null;
-let tileEditor = null;
-let tileEditorHost = null;
-let tileImageClickHandler = null;
+const stageEl = ref(null)
+const stageSize = reactive({ width: 0, height: 0 })
+const activeNodeId = ref("")
+const activeEdgeId = ref("")
+const popoverNodeId = ref("")
+const editingTileId = ref("")
+const tileDraft = reactive({ title: "", bodyDelta: "", bodyHtml: "", fallbackText: "" })
+const tileImageResizeBar = reactive({ visible: false, top: 0, left: 0, imageEl: null })
+let resizeObserver = null
+let tileEditor = null
+let tileEditorHost = null
+let tileImageClickHandler = null
 
 // Compact, visible spacing between routes.
-const BASE_CORRIDOR_GAP = 10;
-const LANE_STEP = 10;
-const LANE_MARGIN = 4;
-const MAX_INTERNAL_TILE_GAP = 18;
-const OUTER_PADDING = 18;
-const PERIMETER_ROUTE_LANE = 12;
-const MIN_SIDE_WIDTH = 150;
-const MIN_FOCUS_WIDTH = 210;
-const MAX_VISIBLE_TILES = 28;
-const TREEMAP_MAX_VISIBLE_TILES = 48;
-const TREEMAP_MAX_EDGES_TO_ROUTE = 96;
-const CURRENT_NODE_EDGE_PRIORITY_BOOST = 1000;
-const FOCUS_MIN_SCORE = 36;
-const HOP_DECAY = 0.58;
-const CONTENT_SCORE_CAP = 12;
-const HTML_RICHNESS_SCORE_CAP = 10;
-const UNTITLED_PAGE_LABEL = '(untitled)';
-const ENDPOINT_STEP = 12;
-const FOCUS_SCORE_BOOST_RATIO = 1.08;
-const TREEMAP_CURRENT_SCORE_BOOST_RATIO = 1.16;
+const BASE_CORRIDOR_GAP = 10
+const LANE_STEP = 10
+const LANE_MARGIN = 4
+const MAX_INTERNAL_TILE_GAP = 18
+const OUTER_PADDING = 18
+const PERIMETER_ROUTE_LANE = 12
+const MIN_SIDE_WIDTH = 150
+const MIN_FOCUS_WIDTH = 210
+const MAX_VISIBLE_TILES = 28
+const TREEMAP_MAX_VISIBLE_TILES = 48
+const TREEMAP_MAX_EDGES_TO_ROUTE = 96
+const CURRENT_NODE_EDGE_PRIORITY_BOOST = 1000
+const FOCUS_MIN_SCORE = 36
+const HOP_DECAY = 0.58
+const CONTENT_SCORE_CAP = 12
+const HTML_RICHNESS_SCORE_CAP = 10
+const UNTITLED_PAGE_LABEL = "(untitled)"
+const ENDPOINT_STEP = 12
+const FOCUS_SCORE_BOOST_RATIO = 1.08
+const TREEMAP_CURRENT_SCORE_BOOST_RATIO = 1.16
 // When the map has only a few blocks, lower the focus floor to 72% so two adjacent blocks can grow toward one third of the screen.
-const MIN_FOCUS_FALLBACK_RATIO = 0.72;
-const MIN_TILES_FOR_BALANCED_FOCUS = 3;
+const MIN_FOCUS_FALLBACK_RATIO = 0.72
+const MIN_TILES_FOR_BALANCED_FOCUS = 3
 // Empirically favors slightly wide, readable text blocks while leaving enough gutters for conduits.
-const TREEMAP_ASPECT_RATIO = 1.18;
-const MIN_TILE_FONT_SIZE = 10;
-const TILE_FONT_SCALE = 24;
-const FOCUS_MAX_FONT_SIZE = 18;
-const TILE_MAX_FONT_SIZE = 16;
-const MIN_VERTICAL_LABEL_LENGTH = 60;
-const ROUTE_EDGE_PADDING = 18;
-const ROUTE_CARD_CLEARANCE = 14;
-const ROUTE_MASK_CARD_BLEED = 0;
-const ROUTE_MASK_CARD_BORDER_RADIUS = 13;
-const ROUTE_CORNER_RADIUS = 9;
-const SAME_GROUP_ROUTE_PADDING = 24;
-const SAME_GROUP_LANE_STEP = 16;
-const LABEL_DEFAULT_OFFSET = 12;
-const LABEL_STACK_STEP = 18;
-const LABEL_COLLISION_GAP = 8;
-const LABEL_MIN_WIDTH = 46;
-const LABEL_MAX_WIDTH = 170;
-const LABEL_HEIGHT = 24;
-const LABEL_CHARACTER_WIDTH_ESTIMATE = 6.5;
-const LABEL_HORIZONTAL_PADDING_ESTIMATE = 22;
-const LABEL_PLACEMENT_MAX_ATTEMPTS = 8;
-const ROUTE_HIT_PADDING = 10;
-const ARROWHEAD_LENGTH = 12;
-const ARROWHEAD_WIDTH = 10;
-const ROUTE_OBSTACLE_EPSILON = 0.01;
-const ROUTE_TURN_PENALTY = 14;
-const ROUTE_COORDINATE_PRECISION = 100;
+const TREEMAP_ASPECT_RATIO = 1.18
+const MIN_TILE_FONT_SIZE = 10
+const TILE_FONT_SCALE = 24
+const FOCUS_MAX_FONT_SIZE = 18
+const TILE_MAX_FONT_SIZE = 16
+const MIN_VERTICAL_LABEL_LENGTH = 60
+const ROUTE_EDGE_PADDING = 18
+const ROUTE_CARD_CLEARANCE = 14
+const ROUTE_MASK_CARD_BLEED = 0
+const ROUTE_MASK_CARD_BORDER_RADIUS = 13
+const ROUTE_CORNER_RADIUS = 9
+const SAME_GROUP_ROUTE_PADDING = 24
+const SAME_GROUP_LANE_STEP = 16
+const LABEL_DEFAULT_OFFSET = 12
+const LABEL_STACK_STEP = 18
+const LABEL_COLLISION_GAP = 8
+const LABEL_MIN_WIDTH = 46
+const LABEL_MAX_WIDTH = 170
+const LABEL_HEIGHT = 24
+const LABEL_CHARACTER_WIDTH_ESTIMATE = 6.5
+const LABEL_HORIZONTAL_PADDING_ESTIMATE = 22
+const LABEL_PLACEMENT_MAX_ATTEMPTS = 8
+const ROUTE_HIT_PADDING = 10
+const ARROWHEAD_LENGTH = 12
+const ARROWHEAD_WIDTH = 10
+const ROUTE_OBSTACLE_EPSILON = 0.01
+const ROUTE_TURN_PENALTY = 14
+const ROUTE_COORDINATE_PRECISION = 100
 
-const isTreemapVariant = computed(() => props.variant === 'treemap');
-const viewKicker = computed(() => isTreemapVariant.value ? 'Block treemap' : 'Bounded block map');
-const viewTitle = computed(() => isTreemapVariant.value ? 'Relationship corridor treemap' : 'Focused relationship masonry');
+const isTreemapVariant = computed(() => props.variant === "treemap")
+const viewKicker = computed(() => (isTreemapVariant.value ? "Block treemap" : "Bounded block map"))
+const viewTitle = computed(() =>
+  isTreemapVariant.value ? "Relationship corridor treemap" : "Focused relationship masonry",
+)
 
 function clamp(value, min, max) {
-  return Math.min(max, Math.max(min, value));
+  return Math.min(max, Math.max(min, value))
 }
 
 function escapeText(value) {
   return String(value)
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#39;');
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;")
 }
 
 function nodeBodyHtml(node) {
-  return sanitizeRichHtml(normalizeEditorHtml(node.bodyHtml || ''));
+  return sanitizeRichHtml(normalizeEditorHtml(node.bodyHtml || ""))
 }
 
 function preservePlainTextFromHtml(html) {
-  if (!html) return '';
+  if (!html) return ""
 
-  const parser = new DOMParser();
-  const doc = parser.parseFromString(html, 'text/html');
+  const parser = new DOMParser()
+  const doc = parser.parseFromString(html, "text/html")
   const blockTags = new Set([
-    'address', 'article', 'aside', 'blockquote', 'div', 'dl', 'dt', 'dd', 'fieldset', 'figcaption',
-    'figure', 'footer', 'form', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'header', 'hr', 'li', 'main',
-    'nav', 'ol', 'p', 'pre', 'section', 'table', 'tbody', 'td', 'tfoot', 'th', 'thead', 'tr', 'ul',
-  ]);
+    "address",
+    "article",
+    "aside",
+    "blockquote",
+    "div",
+    "dl",
+    "dt",
+    "dd",
+    "fieldset",
+    "figcaption",
+    "figure",
+    "footer",
+    "form",
+    "h1",
+    "h2",
+    "h3",
+    "h4",
+    "h5",
+    "h6",
+    "header",
+    "hr",
+    "li",
+    "main",
+    "nav",
+    "ol",
+    "p",
+    "pre",
+    "section",
+    "table",
+    "tbody",
+    "td",
+    "tfoot",
+    "th",
+    "thead",
+    "tr",
+    "ul",
+  ])
 
   function walk(node) {
     if (node.nodeType === Node.TEXT_NODE) {
-      return node.textContent?.replace(/[^\S\n]+/g, ' ') || '';
+      return node.textContent?.replace(/[^\S\n]+/g, " ") || ""
     }
 
-    if (node.nodeType !== Node.ELEMENT_NODE) return '';
+    if (node.nodeType !== Node.ELEMENT_NODE) return ""
 
-    const tag = node.tagName.toLowerCase();
-    if (tag === 'br') return '\n';
+    const tag = node.tagName.toLowerCase()
+    if (tag === "br") return "\n"
 
-    const content = Array.from(node.childNodes).map(walk).join('');
+    const content = Array.from(node.childNodes).map(walk).join("")
     if (blockTags.has(tag)) {
-      const trimmedContent = content.replace(/^\n+|\n+$/g, '');
-      return trimmedContent ? `\n\n${trimmedContent}\n\n` : '\n\n';
+      const trimmedContent = content.replace(/^\n+|\n+$/g, "")
+      return trimmedContent ? `\n\n${trimmedContent}\n\n` : "\n\n"
     }
 
-    return content;
+    return content
   }
 
   return walk(doc.body)
-    .replace(/\r\n?/g, '\n')
-    .replace(/[ \t]+\n/g, '\n')
-    .replace(/\n[ \t]+/g, '\n')
-    .replace(/\n{3,}/g, '\n\n')
-    .trim();
+    .replace(/\r\n?/g, "\n")
+    .replace(/[ \t]+\n/g, "\n")
+    .replace(/\n[ \t]+/g, "\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim()
 }
 
 function plainTextFromHtml(html) {
-  return preservePlainTextFromHtml(html) || (/<img\s[^>]*>|<img>/i.test(html) ? 'Image-only page.' : '');
+  return preservePlainTextFromHtml(html) || (/<img\s[^>]*>|<img>/i.test(html) ? "Image-only page." : "")
 }
 
 function richnessFromHtml(html) {
-  const imageScore = (html.match(/<img\b/gi)?.length || 0) * 4;
-  const headingScore = (html.match(/<h[1-6]\b/gi)?.length || 0) * 1.6;
-  const listScore = (html.match(/<(ul|ol|li)\b/gi)?.length || 0) * 0.7;
-  const emphasisScore = (html.match(/<(strong|em|blockquote|pre|a)\b/gi)?.length || 0) * 0.8;
-  return clamp(imageScore + headingScore + listScore + emphasisScore, 0, HTML_RICHNESS_SCORE_CAP);
+  const imageScore = (html.match(/<img\b/gi)?.length || 0) * 4
+  const headingScore = (html.match(/<h[1-6]\b/gi)?.length || 0) * 1.6
+  const listScore = (html.match(/<(ul|ol|li)\b/gi)?.length || 0) * 0.7
+  const emphasisScore = (html.match(/<(strong|em|blockquote|pre|a)\b/gi)?.length || 0) * 0.8
+  return clamp(imageScore + headingScore + listScore + emphasisScore, 0, HTML_RICHNESS_SCORE_CAP)
 }
 
 function relationLabel(edge) {
-  const html = sanitizeRichHtml(normalizeEditorHtml(edge.descHtml || ''));
-  return truncateText(richTextFirstLine(html) || edge.desc || 'Relationship', 64);
+  const html = sanitizeRichHtml(normalizeEditorHtml(edge.descHtml || ""))
+  return truncateText(richTextFirstLine(html) || edge.desc || "Relationship", 64)
 }
 
 function relationBodyHtml(edge) {
-  const html = sanitizeRichHtml(normalizeEditorHtml(edge.descHtml || ''));
-  if (html) return html;
-  return `<p>${edge.desc ? escapeText(edge.desc) : 'No relationship details yet.'}</p>`;
+  const html = sanitizeRichHtml(normalizeEditorHtml(edge.descHtml || ""))
+  if (html) return html
+  return `<p>${edge.desc ? escapeText(edge.desc) : "No relationship details yet."}</p>`
 }
 
-const nodesById = computed(() =>
-  new Map(props.nodes.map(node => [node.id, node]))
-);
+const nodesById = computed(() => new Map(props.nodes.map((node) => [node.id, node])))
 
-const nodeContentStats = computed(() =>
-  new Map(props.nodes.map(node => {
-    const html = nodeBodyHtml(node);
-    const plainText = plainTextFromHtml(html);
-    return [node.id, {
-      html,
-      plainText,
-      richness: richnessFromHtml(html),
-    }];
-  }))
-);
+const nodeContentStats = computed(
+  () =>
+    new Map(
+      props.nodes.map((node) => {
+        const html = nodeBodyHtml(node)
+        const plainText = plainTextFromHtml(html)
+        return [
+          node.id,
+          {
+            html,
+            plainText,
+            richness: richnessFromHtml(html),
+          },
+        ]
+      }),
+    ),
+)
 
 const degreeStats = computed(() => {
-  const stats = new Map(props.nodes.map(node => [node.id, { incoming: 0, outgoing: 0, weight: 0 }]));
+  const stats = new Map(props.nodes.map((node) => [node.id, { incoming: 0, outgoing: 0, weight: 0 }]))
   for (const edge of props.edges) {
-    const fromStats = stats.get(edge.fromId);
-    const toStats = stats.get(edge.toId);
-    const weight = edge.weight || DEFAULT_EDGE_WEIGHT;
+    const fromStats = stats.get(edge.fromId)
+    const toStats = stats.get(edge.toId)
+    const weight = edge.weight || DEFAULT_EDGE_WEIGHT
 
     if (fromStats) {
-      fromStats.outgoing++;
-      fromStats.weight += weight;
+      fromStats.outgoing++
+      fromStats.weight += weight
     }
 
     if (toStats) {
-      toStats.incoming++;
-      toStats.weight += weight;
+      toStats.incoming++
+      toStats.weight += weight
     }
   }
-  return stats;
-});
+  return stats
+})
 
 const bestExistingPScores = computed(() => {
-  const scores = new Map(props.nodes.map(node => [node.id, 0]));
+  const scores = new Map(props.nodes.map((node) => [node.id, 0]))
   for (const edge of props.edges) {
-    const from = nodesById.value.get(edge.fromId);
-    const to = nodesById.value.get(edge.toId);
-    if (from) scores.set(from.id, Math.max(scores.get(from.id) || 0, pScore(edge, from) * 0.35));
-    if (to) scores.set(to.id, Math.max(scores.get(to.id) || 0, pScore(edge, to) * 0.35));
+    const from = nodesById.value.get(edge.fromId)
+    const to = nodesById.value.get(edge.toId)
+    if (from) scores.set(from.id, Math.max(scores.get(from.id) || 0, pScore(edge, from) * 0.35))
+    if (to) scores.set(to.id, Math.max(scores.get(to.id) || 0, pScore(edge, to) * 0.35))
   }
-  return scores;
-});
+  return scores
+})
 
 const focusedDistances = computed(() => {
-  const currentId = props.currentId;
-  if (!currentId) return new Map();
-  const distances = new Map([[currentId, { hop: 0, side: 'focus', relationWeight: DEFAULT_EDGE_WEIGHT }]]);
-  const queue = [currentId];
+  const currentId = props.currentId
+  if (!currentId) return new Map()
+  const distances = new Map([[currentId, { hop: 0, side: "focus", relationWeight: DEFAULT_EDGE_WEIGHT }]])
+  const queue = [currentId]
   for (let i = 0; i < queue.length; i++) {
-    const nodeId = queue[i];
-    const current = distances.get(nodeId);
+    const nodeId = queue[i]
+    const current = distances.get(nodeId)
     for (const edge of props.edges) {
-      let nextId = '';
-      let side = current.side;
+      let nextId = ""
+      let side = current.side
       if (edge.fromId === nodeId) {
-        nextId = edge.toId;
-        if (current.hop === 0) side = 'outgoing';
+        nextId = edge.toId
+        if (current.hop === 0) side = "outgoing"
       } else if (edge.toId === nodeId) {
-        nextId = edge.fromId;
-        if (current.hop === 0) side = 'incoming';
+        nextId = edge.fromId
+        if (current.hop === 0) side = "incoming"
       }
-      if (!nextId || distances.has(nextId)) continue;
+      if (!nextId || distances.has(nextId)) continue
       distances.set(nextId, {
         hop: current.hop + 1,
         side,
         relationWeight: edge.weight || DEFAULT_EDGE_WEIGHT,
-      });
-      queue.push(nextId);
+      })
+      queue.push(nextId)
     }
   }
-  return distances;
-});
+  return distances
+})
 
 function focusedPScore(node) {
-  const distance = focusedDistances.value.get(node.id);
-  if (!distance) return 0;
-  if (node.id === props.currentId) return FOCUS_MIN_SCORE;
+  const distance = focusedDistances.value.get(node.id)
+  if (!distance) return 0
+  if (node.id === props.currentId) return FOCUS_MIN_SCORE
 
-  const scoreParts = nodeScoreParts(node);
-  const directEdgeScore = distance.relationWeight * 2.6;
+  const scoreParts = nodeScoreParts(node)
+  const directEdgeScore = distance.relationWeight * 2.6
 
-  return (directEdgeScore
-    + scoreParts.contentScore
-    + scoreParts.richnessScore
-    + scoreParts.visitScore
-    + scoreParts.degreeScore
-    + scoreParts.existingPScore)
-    * Math.pow(HOP_DECAY, Math.max(0, distance.hop - 1));
+  return (
+    (directEdgeScore +
+      scoreParts.contentScore +
+      scoreParts.richnessScore +
+      scoreParts.visitScore +
+      scoreParts.degreeScore +
+      scoreParts.existingPScore) *
+    Math.pow(HOP_DECAY, Math.max(0, distance.hop - 1))
+  )
 }
 
 function nodeScoreParts(node) {
-  const stats = degreeStats.value.get(node.id) || { incoming: 0, outgoing: 0, weight: 0 };
-  const content = nodeContentStats.value.get(node.id) || { plainText: '', richness: 0 };
-  const contentScore = clamp(Math.log2(content.plainText.length + 1) * 1.45, 0, CONTENT_SCORE_CAP);
+  const stats = degreeStats.value.get(node.id) || { incoming: 0, outgoing: 0, weight: 0 }
+  const content = nodeContentStats.value.get(node.id) || { plainText: "", richness: 0 }
+  const contentScore = clamp(Math.log2(content.plainText.length + 1) * 1.45, 0, CONTENT_SCORE_CAP)
   return {
     stats,
     contentScore,
@@ -481,109 +522,106 @@ function nodeScoreParts(node) {
     visitScore: Math.log2((node.visits || 0) + 1) * 1.8,
     degreeScore: Math.log2(stats.incoming + stats.outgoing + 1) * 3,
     existingPScore: bestExistingPScores.value.get(node.id) || 0,
-  };
+  }
 }
 
 function compareTreemapModelsByScoreAndDate(a, b) {
-  return b.score - a.score || (b.node.updatedAt || 0) - (a.node.updatedAt || 0);
+  return b.score - a.score || (b.node.updatedAt || 0) - (a.node.updatedAt || 0)
 }
 
 function capTreemapModels(models) {
-  if (models.length <= TREEMAP_MAX_VISIBLE_TILES) return models;
+  if (models.length <= TREEMAP_MAX_VISIBLE_TILES) return models
 
-  const sorted = [...models].sort(compareTreemapModelsByScoreAndDate);
+  const sorted = [...models].sort(compareTreemapModelsByScoreAndDate)
 
-  const capped = sorted.slice(0, TREEMAP_MAX_VISIBLE_TILES);
-  if (props.currentId && !capped.some(model => model.node.id === props.currentId)) {
-    const current = sorted.find(model => model.node.id === props.currentId);
+  const capped = sorted.slice(0, TREEMAP_MAX_VISIBLE_TILES)
+  if (props.currentId && !capped.some((model) => model.node.id === props.currentId)) {
+    const current = sorted.find((model) => model.node.id === props.currentId)
     if (current) {
-      capped.pop();
-      const insertIndex = capped.findIndex(model => compareTreemapModelsByScoreAndDate(current, model) < 0);
-      if (insertIndex === -1) capped.push(current);
-      else capped.splice(insertIndex, 0, current);
+      capped.pop()
+      const insertIndex = capped.findIndex((model) => compareTreemapModelsByScoreAndDate(current, model) < 0)
+      if (insertIndex === -1) capped.push(current)
+      else capped.splice(insertIndex, 0, current)
     }
   }
 
-  return capped;
+  return capped
 }
 
 const visibleNodeModels = computed(() => {
   if (isTreemapVariant.value) {
-    return capTreemapModels(props.nodes
-      .map(node => ({
+    return capTreemapModels(
+      props.nodes.map((node) => ({
         node,
         hop: node.id === props.currentId ? 0 : 1,
-        side: 'treemap',
+        side: "treemap",
         score: treemapPScore(node),
-      })));
+      })),
+    )
   }
 
   const models = props.nodes
-    .map(node => {
-      const distance = focusedDistances.value.get(node.id);
+    .map((node) => {
+      const distance = focusedDistances.value.get(node.id)
       return {
         node,
         hop: distance?.hop ?? Number.POSITIVE_INFINITY,
-        side: distance?.side ?? 'remote',
+        side: distance?.side ?? "remote",
         score: focusedPScore(node),
-      };
+      }
     })
-    .filter(model => model.node.id === props.currentId || model.score > 0)
+    .filter((model) => model.node.id === props.currentId || model.score > 0)
     .sort((a, b) => {
-      if (a.node.id === props.currentId) return -1;
-      if (b.node.id === props.currentId) return 1;
-      return a.hop - b.hop || b.score - a.score;
+      if (a.node.id === props.currentId) return -1
+      if (b.node.id === props.currentId) return 1
+      return a.hop - b.hop || b.score - a.score
     })
-    .slice(0, MAX_VISIBLE_TILES);
+    .slice(0, MAX_VISIBLE_TILES)
 
   if (models.length <= MIN_TILES_FOR_BALANCED_FOCUS && models.length > 1) {
-    const relatedModels = models.filter(model => model.node.id !== props.currentId);
-    if (!relatedModels.length) return models;
-    const averageRelatedScore = relatedModels.reduce((sum, model) => sum + model.score, 0) / relatedModels.length;
-    const focus = models.find(model => model.node.id === props.currentId);
+    const relatedModels = models.filter((model) => model.node.id !== props.currentId)
+    if (!relatedModels.length) return models
+    const averageRelatedScore = relatedModels.reduce((sum, model) => sum + model.score, 0) / relatedModels.length
+    const focus = models.find((model) => model.node.id === props.currentId)
     if (focus) {
-      focus.score = Math.max(
-        averageRelatedScore * FOCUS_SCORE_BOOST_RATIO,
-        FOCUS_MIN_SCORE * MIN_FOCUS_FALLBACK_RATIO
-      );
+      focus.score = Math.max(averageRelatedScore * FOCUS_SCORE_BOOST_RATIO, FOCUS_MIN_SCORE * MIN_FOCUS_FALLBACK_RATIO)
     }
   }
 
-  return models;
-});
+  return models
+})
 
-const treemapNodeScores = computed(() =>
-  new Map(visibleNodeModels.value.map(model => [model.node.id, model.score]))
-);
+const treemapNodeScores = computed(() => new Map(visibleNodeModels.value.map((model) => [model.node.id, model.score])))
 
 function treemapPScore(node) {
-  const scoreParts = nodeScoreParts(node);
-  const baseScore = 6
-    + scoreParts.contentScore
-    + scoreParts.richnessScore
-    + scoreParts.visitScore
-    + scoreParts.degreeScore
-    + scoreParts.stats.weight * 0.9
-    + scoreParts.existingPScore;
-  return node.id === props.currentId ? baseScore * TREEMAP_CURRENT_SCORE_BOOST_RATIO : baseScore;
+  const scoreParts = nodeScoreParts(node)
+  const baseScore =
+    6 +
+    scoreParts.contentScore +
+    scoreParts.richnessScore +
+    scoreParts.visitScore +
+    scoreParts.degreeScore +
+    scoreParts.stats.weight * 0.9 +
+    scoreParts.existingPScore
+  return node.id === props.currentId ? baseScore * TREEMAP_CURRENT_SCORE_BOOST_RATIO : baseScore
 }
 
 function treemapGroup(models, bounds) {
-  if (!models.length || bounds.width <= 0 || bounds.height <= 0) return [];
+  if (!models.length || bounds.width <= 0 || bounds.height <= 0) return []
   const root = hierarchy({
-    children: models.map(model => ({
+    children: models.map((model) => ({
       ...model,
       value: Math.max(1, model.score),
     })),
-  }).sum(item => item.value || 0);
+  }).sum((item) => item.value || 0)
 
   treemap()
     .tile(treemapSquarify.ratio(TREEMAP_ASPECT_RATIO))
     .size([bounds.width, bounds.height])
     .paddingInner(bounds.padding)
-    .round(true)(root);
+    .round(true)(root)
 
-  return root.leaves().map(leaf => ({
+  return root.leaves().map((leaf) => ({
     ...leaf.data,
     groupKey: bounds.groupKey,
     groupIndex: bounds.groupIndex,
@@ -591,94 +629,91 @@ function treemapGroup(models, bounds) {
     y: bounds.y + leaf.y0,
     width: Math.max(1, leaf.x1 - leaf.x0),
     height: Math.max(1, leaf.y1 - leaf.y0),
-  }));
+  }))
 }
 
 function corridorWidth(routeCount) {
-  if (routeCount <= 0) return BASE_CORRIDOR_GAP;
-  return LANE_MARGIN * 2 + routeCount * LANE_STEP;
+  if (routeCount <= 0) return BASE_CORRIDOR_GAP
+  return LANE_MARGIN * 2 + routeCount * LANE_STEP
 }
 
 function internalTileGap(routeCount) {
-  if (routeCount <= 0) return BASE_CORRIDOR_GAP;
-  return Math.min(MAX_INTERNAL_TILE_GAP, BASE_CORRIDOR_GAP + routeCount * 2);
+  if (routeCount <= 0) return BASE_CORRIDOR_GAP
+  return Math.min(MAX_INTERNAL_TILE_GAP, BASE_CORRIDOR_GAP + routeCount * 2)
 }
 
 function createCorridorLoadsArray(groupCount) {
-  return Array.from({ length: Math.max(0, groupCount - 1) }, () => 0);
+  return Array.from({ length: Math.max(0, groupCount - 1) }, () => 0)
 }
 
 function groupForNode(groupsByNodeId, nodeId) {
-  return groupsByNodeId.get(nodeId);
+  return groupsByNodeId.get(nodeId)
 }
 
 function corridorLoadsForGroups(groups, groupsByNodeId) {
-  const loads = createCorridorLoadsArray(groups.length);
+  const loads = createCorridorLoadsArray(groups.length)
   for (const edge of props.edges) {
-    const from = groupForNode(groupsByNodeId, edge.fromId);
-    const to = groupForNode(groupsByNodeId, edge.toId);
-    if (!from || !to || from.index === to.index) continue;
-    const start = Math.min(from.index, to.index);
-    const end = Math.max(from.index, to.index);
-    for (let i = start; i < end; i++) loads[i]++;
+    const from = groupForNode(groupsByNodeId, edge.fromId)
+    const to = groupForNode(groupsByNodeId, edge.toId)
+    if (!from || !to || from.index === to.index) continue
+    const start = Math.min(from.index, to.index)
+    const end = Math.max(from.index, to.index)
+    for (let i = start; i < end; i++) loads[i]++
   }
-  return loads;
+  return loads
 }
 
 function internalGroupLoads(groupsByNodeId) {
-  const loads = new Map();
+  const loads = new Map()
   for (const edge of props.edges) {
-    const from = groupForNode(groupsByNodeId, edge.fromId);
-    const to = groupForNode(groupsByNodeId, edge.toId);
-    if (!from || !to || from.index !== to.index) continue;
-    loads.set(from.key, (loads.get(from.key) || 0) + 1);
+    const from = groupForNode(groupsByNodeId, edge.fromId)
+    const to = groupForNode(groupsByNodeId, edge.toId)
+    if (!from || !to || from.index !== to.index) continue
+    loads.set(from.key, (loads.get(from.key) || 0) + 1)
   }
-  return loads;
+  return loads
 }
 
 function groupWeight(group) {
-  return Math.max(1, group.value);
+  return Math.max(1, group.value)
 }
 
 function groupMinWidth(group, availableWidth) {
-  return group.key === 'focus'
-    ? Math.min(MIN_FOCUS_WIDTH, availableWidth)
-    : Math.min(MIN_SIDE_WIDTH, availableWidth);
+  return group.key === "focus" ? Math.min(MIN_FOCUS_WIDTH, availableWidth) : Math.min(MIN_SIDE_WIDTH, availableWidth)
 }
 
 function allocateGroupWidths(groups, availableWidth) {
-  const totalValue = groups.reduce((sum, group) => sum + groupWeight(group), 0);
-  let remainingWidth = availableWidth;
-  let remainingValue = totalValue;
-  const widths = new Map();
+  const totalValue = groups.reduce((sum, group) => sum + groupWeight(group), 0)
+  let remainingWidth = availableWidth
+  let remainingValue = totalValue
+  const widths = new Map()
 
   for (const group of groups) {
-    const minWidth = groupMinWidth(group, availableWidth);
-    const idealWidth = availableWidth * (groupWeight(group) / totalValue);
+    const minWidth = groupMinWidth(group, availableWidth)
+    const idealWidth = availableWidth * (groupWeight(group) / totalValue)
     if (idealWidth < minWidth && groups.length > 1) {
-      widths.set(group.key, minWidth);
-      remainingWidth -= minWidth;
-      remainingValue -= groupWeight(group);
+      widths.set(group.key, minWidth)
+      remainingWidth -= minWidth
+      remainingValue -= groupWeight(group)
     }
   }
 
   for (const group of groups) {
-    if (widths.has(group.key)) continue;
-    const widthShare = remainingValue > 0
-      ? remainingWidth * (groupWeight(group) / remainingValue)
-      : remainingWidth / groups.length;
-    widths.set(group.key, Math.max(1, widthShare));
+    if (widths.has(group.key)) continue
+    const widthShare =
+      remainingValue > 0 ? remainingWidth * (groupWeight(group) / remainingValue) : remainingWidth / groups.length
+    widths.set(group.key, Math.max(1, widthShare))
   }
 
-  return widths;
+  return widths
 }
 
 const layoutState = computed(() => {
-  const width = stageSize.width - OUTER_PADDING * 2;
-  const height = stageSize.height - OUTER_PADDING * 2;
-  if (width <= 0 || height <= 0) return { models: [], corridors: [] };
+  const width = stageSize.width - OUTER_PADDING * 2
+  const height = stageSize.height - OUTER_PADDING * 2
+  if (width <= 0 || height <= 0) return { models: [], corridors: [] }
 
-  const models = visibleNodeModels.value;
+  const models = visibleNodeModels.value
   if (isTreemapVariant.value) {
     return {
       models: treemapGroup(models, {
@@ -687,46 +722,47 @@ const layoutState = computed(() => {
         width,
         height,
         padding: internalTileGap(props.edges.length),
-        groupKey: 'treemap',
+        groupKey: "treemap",
         groupIndex: 0,
       }),
       corridors: [],
-    };
-  }
-
-  const focus = models.find(model => model.node.id === props.currentId);
-  if (!focus) return { models: [], corridors: [] };
-
-  const incoming = models.filter(model => model.node.id !== props.currentId && model.side === 'incoming');
-  const outgoing = models.filter(model => model.node.id !== props.currentId && model.side !== 'incoming');
-  const groups = [
-    { key: 'incoming', models: incoming, value: incoming.reduce((sum, model) => sum + model.score, 0) },
-    { key: 'focus', models: [focus], value: focus.score },
-    { key: 'outgoing', models: outgoing, value: outgoing.reduce((sum, model) => sum + model.score, 0) },
-  ].filter(group => group.models.length)
-    .map((group, index) => ({ ...group, index }));
-
-  const groupsByNodeId = new Map();
-  for (const group of groups) {
-    for (const model of group.models) {
-      groupsByNodeId.set(model.node.id, { key: group.key, index: group.index });
     }
   }
 
-  const corridorLoads = corridorLoadsForGroups(groups, groupsByNodeId);
-  const corridorWidths = corridorLoads.map(corridorWidth);
-  const internalLoads = internalGroupLoads(groupsByNodeId);
-  const gapTotal = corridorWidths.reduce((sum, gap) => sum + gap, 0);
-  const availableWidth = Math.max(1, width - gapTotal);
-  // For multiple groups, enforce minimum widths to preserve readable columns; single-group layouts fill the stage naturally.
-  const widths = allocateGroupWidths(groups, availableWidth);
+  const focus = models.find((model) => model.node.id === props.currentId)
+  if (!focus) return { models: [], corridors: [] }
 
-  let x = OUTER_PADDING;
-  const laidOut = [];
-  const corridors = [];
+  const incoming = models.filter((model) => model.node.id !== props.currentId && model.side === "incoming")
+  const outgoing = models.filter((model) => model.node.id !== props.currentId && model.side !== "incoming")
+  const groups = [
+    { key: "incoming", models: incoming, value: incoming.reduce((sum, model) => sum + model.score, 0) },
+    { key: "focus", models: [focus], value: focus.score },
+    { key: "outgoing", models: outgoing, value: outgoing.reduce((sum, model) => sum + model.score, 0) },
+  ]
+    .filter((group) => group.models.length)
+    .map((group, index) => ({ ...group, index }))
+
+  const groupsByNodeId = new Map()
   for (const group of groups) {
-    const groupWidth = widths.get(group.key);
-    if (group.key === 'focus') {
+    for (const model of group.models) {
+      groupsByNodeId.set(model.node.id, { key: group.key, index: group.index })
+    }
+  }
+
+  const corridorLoads = corridorLoadsForGroups(groups, groupsByNodeId)
+  const corridorWidths = corridorLoads.map(corridorWidth)
+  const internalLoads = internalGroupLoads(groupsByNodeId)
+  const gapTotal = corridorWidths.reduce((sum, gap) => sum + gap, 0)
+  const availableWidth = Math.max(1, width - gapTotal)
+  // For multiple groups, enforce minimum widths to preserve readable columns; single-group layouts fill the stage naturally.
+  const widths = allocateGroupWidths(groups, availableWidth)
+
+  let x = OUTER_PADDING
+  const laidOut = []
+  const corridors = []
+  for (const group of groups) {
+    const groupWidth = widths.get(group.key)
+    if (group.key === "focus") {
       laidOut.push({
         ...focus,
         groupKey: group.key,
@@ -735,69 +771,71 @@ const layoutState = computed(() => {
         y: OUTER_PADDING,
         width: groupWidth,
         height,
-      });
+      })
     } else {
-      laidOut.push(...treemapGroup(group.models, {
-        x,
-        y: OUTER_PADDING,
-        width: groupWidth,
-        height,
-        padding: internalTileGap(internalLoads.get(group.key) || 0),
-        groupKey: group.key,
-        groupIndex: group.index,
-      }));
+      laidOut.push(
+        ...treemapGroup(group.models, {
+          x,
+          y: OUTER_PADDING,
+          width: groupWidth,
+          height,
+          padding: internalTileGap(internalLoads.get(group.key) || 0),
+          groupKey: group.key,
+          groupIndex: group.index,
+        }),
+      )
     }
-    const gapWidth = corridorWidths[group.index] || 0;
+    const gapWidth = corridorWidths[group.index] || 0
     if (gapWidth) {
       corridors[group.index] = {
         index: group.index,
         x: x + groupWidth,
         width: gapWidth,
         load: corridorLoads[group.index] || 0,
-      };
+      }
     }
-    x += groupWidth + gapWidth;
+    x += groupWidth + gapWidth
   }
 
-  return { models: laidOut, corridors };
-});
+  return { models: laidOut, corridors }
+})
 
-const layoutModels = computed(() => layoutState.value.models);
-const routeCorridors = computed(() => layoutState.value.corridors);
+const layoutModels = computed(() => layoutState.value.models)
+const routeCorridors = computed(() => layoutState.value.corridors)
 
 function roleLabel(model) {
   if (isTreemapVariant.value) {
-    if (model.node.id === props.currentId) return 'Current page';
-    const stats = degreeStats.value.get(model.node.id) || { incoming: 0, outgoing: 0 };
-    const count = stats.incoming + stats.outgoing;
-    return `${count} relation${count === 1 ? '' : 's'}`;
+    if (model.node.id === props.currentId) return "Current page"
+    const stats = degreeStats.value.get(model.node.id) || { incoming: 0, outgoing: 0 }
+    const count = stats.incoming + stats.outgoing
+    return `${count} relation${count === 1 ? "" : "s"}`
   }
-  if (model.node.id === props.currentId) return 'Focused page';
-  if (model.hop > 1) return `${model.hop} hops ${model.side === 'incoming' ? 'in' : 'out'}`;
-  return model.side === 'incoming' ? 'Incoming' : 'Outgoing';
+  if (model.node.id === props.currentId) return "Focused page"
+  if (model.hop > 1) return `${model.hop} hops ${model.side === "incoming" ? "in" : "out"}`
+  return model.side === "incoming" ? "Incoming" : "Outgoing"
 }
 
 const visibleTiles = computed(() =>
-  layoutModels.value.map(model => {
-    const areaRatio = clamp((model.width * model.height) / Math.max(1, stageSize.width * stageSize.height), 0, 1);
+  layoutModels.value.map((model) => {
+    const areaRatio = clamp((model.width * model.height) / Math.max(1, stageSize.width * stageSize.height), 0, 1)
     const fontSize = clamp(
       MIN_TILE_FONT_SIZE + Math.sqrt(areaRatio) * TILE_FONT_SCALE,
       MIN_TILE_FONT_SIZE,
-      model.node.id === props.currentId ? FOCUS_MAX_FONT_SIZE : TILE_MAX_FONT_SIZE
-    );
-    const contentStats = nodeContentStats.value.get(model.node.id);
-    const bodyHtml = contentStats?.html || '';
+      model.node.id === props.currentId ? FOCUS_MAX_FONT_SIZE : TILE_MAX_FONT_SIZE,
+    )
+    const contentStats = nodeContentStats.value.get(model.node.id)
+    const bodyHtml = contentStats?.html || ""
     return {
       id: model.node.id,
       isFocus: model.node.id === props.currentId,
       hop: model.hop,
-      title: model.node.title || '(untitled)',
+      title: model.node.title || "(untitled)",
       roleLabel: roleLabel(model),
       scoreLabel: model.score.toFixed(1),
       bodyHtml,
-      bodyText: contentStats?.plainText || '',
-      bodyDelta: model.node.bodyDelta || '',
-      meta: `Edited ${timeAgo(model.node.updatedAt)} · ${model.node.visits || 0} visit${model.node.visits === 1 ? '' : 's'}`,
+      bodyText: contentStats?.plainText || "",
+      bodyDelta: model.node.bodyDelta || "",
+      meta: `Edited ${timeAgo(model.node.updatedAt)} · ${model.node.visits || 0} visit${model.node.visits === 1 ? "" : "s"}`,
       rect: model,
       style: {
         left: `${model.x}px`,
@@ -806,144 +844,141 @@ const visibleTiles = computed(() =>
         height: `${model.height}px`,
         fontSize: `${fontSize}px`,
       },
-    };
-  })
-);
+    }
+  }),
+)
 
-const tileRects = computed(() =>
-  new Map(visibleTiles.value.map(tile => [tile.id, tile.rect]))
-);
+const tileRects = computed(() => new Map(visibleTiles.value.map((tile) => [tile.id, tile.rect])))
 
 const eligibleVisibleEdges = computed(() =>
-  props.edges
-    .filter(edge => tileRects.value.has(edge.fromId) && tileRects.value.has(edge.toId))
-);
+  props.edges.filter((edge) => tileRects.value.has(edge.fromId) && tileRects.value.has(edge.toId)),
+)
 
 function treemapEdgeRoutingScore(edge) {
-  const touchesCurrent = edge.fromId === props.currentId || edge.toId === props.currentId;
-  const fromScore = treemapNodeScores.value.get(edge.fromId) || 0;
-  const toScore = treemapNodeScores.value.get(edge.toId) || 0;
-  return (touchesCurrent ? CURRENT_NODE_EDGE_PRIORITY_BOOST : 0)
-    + (edge.weight || DEFAULT_EDGE_WEIGHT) * 10
-    + Math.max(fromScore, toScore);
+  const touchesCurrent = edge.fromId === props.currentId || edge.toId === props.currentId
+  const fromScore = treemapNodeScores.value.get(edge.fromId) || 0
+  const toScore = treemapNodeScores.value.get(edge.toId) || 0
+  return (
+    (touchesCurrent ? CURRENT_NODE_EDGE_PRIORITY_BOOST : 0) +
+    (edge.weight || DEFAULT_EDGE_WEIGHT) * 10 +
+    Math.max(fromScore, toScore)
+  )
 }
 
 function insertTreemapEdgeCandidate(candidates, candidate) {
-  const insertIndex = candidates.findIndex(item => candidate.score > item.score);
-  if (insertIndex === -1) candidates.push(candidate);
-  else candidates.splice(insertIndex, 0, candidate);
+  const insertIndex = candidates.findIndex((item) => candidate.score > item.score)
+  if (insertIndex === -1) candidates.push(candidate)
+  else candidates.splice(insertIndex, 0, candidate)
 }
 
 function topTreemapEdgesToRoute(edges) {
-  const candidates = [];
+  const candidates = []
   for (const edge of edges) {
-    const candidate = { edge, score: treemapEdgeRoutingScore(edge) };
+    const candidate = { edge, score: treemapEdgeRoutingScore(edge) }
     if (candidates.length < TREEMAP_MAX_EDGES_TO_ROUTE) {
-      insertTreemapEdgeCandidate(candidates, candidate);
+      insertTreemapEdgeCandidate(candidates, candidate)
     } else if (candidate.score >= candidates[candidates.length - 1].score) {
-      candidates.pop();
-      insertTreemapEdgeCandidate(candidates, candidate);
+      candidates.pop()
+      insertTreemapEdgeCandidate(candidates, candidate)
     }
   }
-  return candidates.map(({ edge }) => edge);
+  return candidates.map(({ edge }) => edge)
 }
 
 const visibleEdges = computed(() => {
-  const edges = eligibleVisibleEdges.value;
-  if (!isTreemapVariant.value || edges.length <= TREEMAP_MAX_EDGES_TO_ROUTE) return edges;
+  const edges = eligibleVisibleEdges.value
+  if (!isTreemapVariant.value || edges.length <= TREEMAP_MAX_EDGES_TO_ROUTE) return edges
 
-  return topTreemapEdgesToRoute(edges);
-});
+  return topTreemapEdgesToRoute(edges)
+})
 
-const visibleTileCount = computed(() => visibleTiles.value.length);
-const routedEdgeCount = computed(() => routedEdges.value.length);
-const eligibleVisibleEdgeCount = computed(() => eligibleVisibleEdges.value.length);
-const totalNodeCount = computed(() => props.nodes.length);
+const visibleTileCount = computed(() => visibleTiles.value.length)
+const routedEdgeCount = computed(() => routedEdges.value.length)
+const eligibleVisibleEdgeCount = computed(() => eligibleVisibleEdges.value.length)
+const totalNodeCount = computed(() => props.nodes.length)
 
 const toolbarSummary = computed(() => {
-  if (!isTreemapVariant.value) return `${visibleTileCount.value} blocks · ${routedEdgeCount.value} conduits`;
+  if (!isTreemapVariant.value) return `${visibleTileCount.value} blocks · ${routedEdgeCount.value} conduits`
 
-  const blocks = totalNodeCount.value > visibleTileCount.value
-    ? `${visibleTileCount.value} / ${totalNodeCount.value} blocks`
-    : `${visibleTileCount.value} blocks`;
-  const conduits = eligibleVisibleEdgeCount.value > routedEdgeCount.value
-    ? `${routedEdgeCount.value} / ${eligibleVisibleEdgeCount.value} conduits`
-    : `${routedEdgeCount.value} conduits`;
-  return `${blocks} · ${conduits}`;
-});
+  const blocks =
+    totalNodeCount.value > visibleTileCount.value
+      ? `${visibleTileCount.value} / ${totalNodeCount.value} blocks`
+      : `${visibleTileCount.value} blocks`
+  const conduits =
+    eligibleVisibleEdgeCount.value > routedEdgeCount.value
+      ? `${routedEdgeCount.value} / ${eligibleVisibleEdgeCount.value} conduits`
+      : `${routedEdgeCount.value} conduits`
+  return `${blocks} · ${conduits}`
+})
 
 function rectCenter(rect) {
   return {
     x: rect.x + rect.width / 2,
     y: rect.y + rect.height / 2,
-  };
+  }
 }
 
 function oppositeSide(side) {
-  return { left: 'right', right: 'left', top: 'bottom', bottom: 'top' }[side];
+  return { left: "right", right: "left", top: "bottom", bottom: "top" }[side]
 }
 
 function horizontalRouteSides(from, to) {
   return rectCenter(from).x <= rectCenter(to).x
-    ? { startSide: 'right', endSide: 'left' }
-    : { startSide: 'left', endSide: 'right' };
+    ? { startSide: "right", endSide: "left" }
+    : { startSide: "left", endSide: "right" }
 }
 
 function sameGroupRouteSides(from, to) {
-  if (from.x + from.width <= to.x) return { startSide: 'right', endSide: 'left', axis: 'x' };
-  else if (to.x + to.width <= from.x) return { startSide: 'left', endSide: 'right', axis: 'x' };
-  else if (from.y + from.height <= to.y) return { startSide: 'bottom', endSide: 'top', axis: 'y' };
-  else if (to.y + to.height <= from.y) return { startSide: 'top', endSide: 'bottom', axis: 'y' };
-  return { ...horizontalRouteSides(from, to), axis: 'overflow' };
+  if (from.x + from.width <= to.x) return { startSide: "right", endSide: "left", axis: "x" }
+  else if (to.x + to.width <= from.x) return { startSide: "left", endSide: "right", axis: "x" }
+  else if (from.y + from.height <= to.y) return { startSide: "bottom", endSide: "top", axis: "y" }
+  else if (to.y + to.height <= from.y) return { startSide: "top", endSide: "bottom", axis: "y" }
+  return { ...horizontalRouteSides(from, to), axis: "overflow" }
 }
 
 function pointOutsideRect(rect, side, offset) {
-  if (side === 'left' || side === 'right') {
+  if (side === "left" || side === "right") {
     return {
-      x: side === 'left' ? rect.x - ROUTE_CARD_CLEARANCE : rect.x + rect.width + ROUTE_CARD_CLEARANCE,
+      x: side === "left" ? rect.x - ROUTE_CARD_CLEARANCE : rect.x + rect.width + ROUTE_CARD_CLEARANCE,
       y: clamp(rectCenter(rect).y + offset, rect.y + ROUTE_EDGE_PADDING, rect.y + rect.height - ROUTE_EDGE_PADDING),
-    };
+    }
   }
   return {
     x: clamp(rectCenter(rect).x + offset, rect.x + ROUTE_EDGE_PADDING, rect.x + rect.width - ROUTE_EDGE_PADDING),
-    y: side === 'top' ? rect.y - ROUTE_CARD_CLEARANCE : rect.y + rect.height + ROUTE_CARD_CLEARANCE,
-  };
+    y: side === "top" ? rect.y - ROUTE_CARD_CLEARANCE : rect.y + rect.height + ROUTE_CARD_CLEARANCE,
+  }
 }
 
 function pointOnRectSide(rect, side, offset) {
-  if (side === 'left' || side === 'right') {
+  if (side === "left" || side === "right") {
     return {
-      x: side === 'left' ? rect.x : rect.x + rect.width,
+      x: side === "left" ? rect.x : rect.x + rect.width,
       y: clamp(rectCenter(rect).y + offset, rect.y + ROUTE_EDGE_PADDING, rect.y + rect.height - ROUTE_EDGE_PADDING),
-    };
+    }
   }
   return {
     x: clamp(rectCenter(rect).x + offset, rect.x + ROUTE_EDGE_PADDING, rect.x + rect.width - ROUTE_EDGE_PADDING),
-    y: side === 'top' ? rect.y : rect.y + rect.height,
-  };
+    y: side === "top" ? rect.y : rect.y + rect.height,
+  }
 }
 
 function adjacentCorridorBetween(from, to) {
-  const lowerGroupIndex = Math.min(from.groupIndex, to.groupIndex);
-  return routeCorridors.value[lowerGroupIndex] || null;
+  const lowerGroupIndex = Math.min(from.groupIndex, to.groupIndex)
+  return routeCorridors.value[lowerGroupIndex] || null
 }
 
 function laneXInCorridor(corridor, laneOffset) {
-  if (!corridor) return null;
-  const center = corridor.x + corridor.width / 2;
-  return clamp(
-    center + laneOffset,
-    corridor.x + LANE_MARGIN,
-    corridor.x + corridor.width - LANE_MARGIN
-  );
+  if (!corridor) return null
+  const center = corridor.x + corridor.width / 2
+  return clamp(center + laneOffset, corridor.x + LANE_MARGIN, corridor.x + corridor.width - LANE_MARGIN)
 }
 
 function corridorIndexesBetween(from, to) {
-  const start = Math.min(from.groupIndex, to.groupIndex);
-  const end = Math.max(from.groupIndex, to.groupIndex);
-  const indexes = [];
-  for (let index = start; index < end; index++) indexes.push(index);
-  return indexes;
+  const start = Math.min(from.groupIndex, to.groupIndex)
+  const end = Math.max(from.groupIndex, to.groupIndex)
+  const indexes = []
+  for (let index = start; index < end; index++) indexes.push(index)
+  return indexes
 }
 
 /**
@@ -951,61 +986,61 @@ function corridorIndexesBetween(from, to) {
  * Pass a smaller step for route lanes and the default step for card-edge endpoints.
  */
 function distributeOffset(index, count, step = ENDPOINT_STEP) {
-  return (index - (count - 1) / 2) * step;
+  return (index - (count - 1) / 2) * step
 }
 
 function laneGroupKey(plan) {
-  if (plan.groupDistance !== 0) return '';
-  if (plan.axis === 'y') return `y:${plan.from.groupIndex}`;
-  if (plan.axis === 'x') return `x:${plan.from.groupIndex}`;
-  if (plan.axis === 'overflow') {
-    return `overflow:${plan.from.groupIndex}:${plan.startSide}`;
+  if (plan.groupDistance !== 0) return ""
+  if (plan.axis === "y") return `y:${plan.from.groupIndex}`
+  if (plan.axis === "x") return `x:${plan.from.groupIndex}`
+  if (plan.axis === "overflow") {
+    return `overflow:${plan.from.groupIndex}:${plan.startSide}`
   }
-  return '';
+  return ""
 }
 
 function laneSortValue(plan) {
-  const from = rectCenter(plan.from);
-  const to = rectCenter(plan.to);
-  return plan.axis === 'x' ? (from.x + to.x) / 2 : (from.y + to.y) / 2;
+  const from = rectCenter(plan.from)
+  const to = rectCenter(plan.to)
+  return plan.axis === "x" ? (from.x + to.x) / 2 : (from.y + to.y) / 2
 }
 
 /**
  * Builds an SVG path from axis-aligned points and rounds each turn with a quadratic curve.
  */
 function roundedOrthogonalPath(points) {
-  points = compactOrthogonalPoints(points);
-  if (points.length < 2) return '';
-  const commands = [`M ${points[0].x} ${points[0].y}`];
+  points = compactOrthogonalPoints(points)
+  if (points.length < 2) return ""
+  const commands = [`M ${points[0].x} ${points[0].y}`]
   for (let i = 1; i < points.length - 1; i++) {
-    const prev = points[i - 1];
-    const current = points[i];
-    const next = points[i + 1];
-    const incomingDistance = Math.abs(current.x - prev.x) + Math.abs(current.y - prev.y);
-    const outgoingDistance = Math.abs(next.x - current.x) + Math.abs(next.y - current.y);
-    const radius = Math.min(ROUTE_CORNER_RADIUS, incomingDistance / 2, outgoingDistance / 2);
+    const prev = points[i - 1]
+    const current = points[i]
+    const next = points[i + 1]
+    const incomingDistance = Math.abs(current.x - prev.x) + Math.abs(current.y - prev.y)
+    const outgoingDistance = Math.abs(next.x - current.x) + Math.abs(next.y - current.y)
+    const radius = Math.min(ROUTE_CORNER_RADIUS, incomingDistance / 2, outgoingDistance / 2)
     if (radius <= 0) {
-      commands.push(`L ${current.x} ${current.y}`);
-      continue;
+      commands.push(`L ${current.x} ${current.y}`)
+      continue
     }
     const before = {
       x: current.x + Math.sign(prev.x - current.x) * radius,
       y: current.y + Math.sign(prev.y - current.y) * radius,
-    };
+    }
     const after = {
       x: current.x + Math.sign(next.x - current.x) * radius,
       y: current.y + Math.sign(next.y - current.y) * radius,
-    };
-    commands.push(`L ${before.x} ${before.y}`);
-    commands.push(`Q ${current.x} ${current.y} ${after.x} ${after.y}`);
+    }
+    commands.push(`L ${before.x} ${before.y}`)
+    commands.push(`Q ${current.x} ${current.y} ${after.x} ${after.y}`)
   }
-  const last = points[points.length - 1];
-  commands.push(`L ${last.x} ${last.y}`);
-  return commands.join(' ');
+  const last = points[points.length - 1]
+  commands.push(`L ${last.x} ${last.y}`)
+  return commands.join(" ")
 }
 
 function createVerticalBendPoints(start, end, midX) {
-  return [start, { x: midX, y: start.y }, { x: midX, y: end.y }, end];
+  return [start, { x: midX, y: start.y }, { x: midX, y: end.y }, end]
 }
 
 function inflateRect(rect, amount) {
@@ -1014,227 +1049,233 @@ function inflateRect(rect, amount) {
     y: rect.y - amount,
     width: rect.width + amount * 2,
     height: rect.height + amount * 2,
-  };
+  }
 }
 
 function pointInRectInterior(point, rect) {
-  return point.x > rect.x + ROUTE_OBSTACLE_EPSILON
-    && point.x < rect.x + rect.width - ROUTE_OBSTACLE_EPSILON
-    && point.y > rect.y + ROUTE_OBSTACLE_EPSILON
-    && point.y < rect.y + rect.height - ROUTE_OBSTACLE_EPSILON;
+  return (
+    point.x > rect.x + ROUTE_OBSTACLE_EPSILON &&
+    point.x < rect.x + rect.width - ROUTE_OBSTACLE_EPSILON &&
+    point.y > rect.y + ROUTE_OBSTACLE_EPSILON &&
+    point.y < rect.y + rect.height - ROUTE_OBSTACLE_EPSILON
+  )
 }
 
 function rangesOverlap(startA, endA, startB, endB) {
-  const overlapStart = Math.max(Math.min(startA, endA), Math.min(startB, endB));
-  const overlapEnd = Math.min(Math.max(startA, endA), Math.max(startB, endB));
-  return overlapStart + ROUTE_OBSTACLE_EPSILON < overlapEnd;
+  const overlapStart = Math.max(Math.min(startA, endA), Math.min(startB, endB))
+  const overlapEnd = Math.min(Math.max(startA, endA), Math.max(startB, endB))
+  return overlapStart + ROUTE_OBSTACLE_EPSILON < overlapEnd
 }
 
 function segmentIntersectsRect(start, end, rect) {
   if (start.x === end.x) {
-    return start.x > rect.x + ROUTE_OBSTACLE_EPSILON
-      && start.x < rect.x + rect.width - ROUTE_OBSTACLE_EPSILON
-      && rangesOverlap(start.y, end.y, rect.y, rect.y + rect.height);
+    return (
+      start.x > rect.x + ROUTE_OBSTACLE_EPSILON &&
+      start.x < rect.x + rect.width - ROUTE_OBSTACLE_EPSILON &&
+      rangesOverlap(start.y, end.y, rect.y, rect.y + rect.height)
+    )
   }
   if (start.y === end.y) {
-    return start.y > rect.y + ROUTE_OBSTACLE_EPSILON
-      && start.y < rect.y + rect.height - ROUTE_OBSTACLE_EPSILON
-      && rangesOverlap(start.x, end.x, rect.x, rect.x + rect.width);
+    return (
+      start.y > rect.y + ROUTE_OBSTACLE_EPSILON &&
+      start.y < rect.y + rect.height - ROUTE_OBSTACLE_EPSILON &&
+      rangesOverlap(start.x, end.x, rect.x, rect.x + rect.width)
+    )
   }
-  return false;
+  return false
 }
 
 function routeObstacleRects() {
-  return visibleTiles.value.map(tile => inflateRect(tile.rect, ROUTE_MASK_CARD_BLEED));
+  return visibleTiles.value.map((tile) => inflateRect(tile.rect, ROUTE_MASK_CARD_BLEED))
 }
 
 function segmentBlocked(start, end, obstacles) {
-  return obstacles.some(rect => segmentIntersectsRect(start, end, rect));
+  return obstacles.some((rect) => segmentIntersectsRect(start, end, rect))
 }
 
 function routeIsClear(points, obstacles) {
   for (let index = 1; index < points.length; index++) {
-    if (segmentBlocked(points[index - 1], points[index], obstacles)) return false;
+    if (segmentBlocked(points[index - 1], points[index], obstacles)) return false
   }
-  return true;
+  return true
 }
 
 function uniqueSortedLines(values, min, max) {
-  return [...new Set(values
-    .map(value => roundToRoutePrecision(clamp(value, min, max))))]
-    .sort((a, b) => a - b);
+  return [...new Set(values.map((value) => roundToRoutePrecision(clamp(value, min, max))))].sort((a, b) => a - b)
 }
 
 function roundToRoutePrecision(value) {
-  return Math.round(value * ROUTE_COORDINATE_PRECISION) / ROUTE_COORDINATE_PRECISION;
+  return Math.round(value * ROUTE_COORDINATE_PRECISION) / ROUTE_COORDINATE_PRECISION
 }
 
 function routePoint(point) {
   return {
     x: roundToRoutePrecision(point.x),
     y: roundToRoutePrecision(point.y),
-  };
+  }
 }
 
 function routeGridLines(start, end, preferredPoints, obstacles) {
-  const validPreferredPoints = preferredPoints.filter(point => point && Number.isFinite(point.x) && Number.isFinite(point.y));
+  const validPreferredPoints = preferredPoints.filter(
+    (point) => point && Number.isFinite(point.x) && Number.isFinite(point.y),
+  )
   const xLines = [
     ROUTE_EDGE_PADDING,
     stageSize.width - ROUTE_EDGE_PADDING,
     start.x,
     end.x,
-    ...validPreferredPoints.map(point => point.x),
-  ];
+    ...validPreferredPoints.map((point) => point.x),
+  ]
   const yLines = [
     PERIMETER_ROUTE_LANE,
     stageSize.height - PERIMETER_ROUTE_LANE,
     start.y,
     end.y,
-    ...validPreferredPoints.map(point => point.y),
-  ];
+    ...validPreferredPoints.map((point) => point.y),
+  ]
   for (const rect of obstacles) {
-    xLines.push(rect.x - ROUTE_CARD_CLEARANCE, rect.x + rect.width + ROUTE_CARD_CLEARANCE);
-    yLines.push(rect.y - ROUTE_CARD_CLEARANCE, rect.y + rect.height + ROUTE_CARD_CLEARANCE);
+    xLines.push(rect.x - ROUTE_CARD_CLEARANCE, rect.x + rect.width + ROUTE_CARD_CLEARANCE)
+    yLines.push(rect.y - ROUTE_CARD_CLEARANCE, rect.y + rect.height + ROUTE_CARD_CLEARANCE)
   }
   for (const corridor of routeCorridors.value.filter(Boolean)) {
     xLines.push(
       corridor.x + ROUTE_EDGE_PADDING / 2,
       corridor.x + corridor.width / 2,
-      corridor.x + corridor.width - ROUTE_EDGE_PADDING / 2
-    );
+      corridor.x + corridor.width - ROUTE_EDGE_PADDING / 2,
+    )
   }
   return {
     xLines: uniqueSortedLines(xLines, ROUTE_EDGE_PADDING, stageSize.width - ROUTE_EDGE_PADDING),
     yLines: uniqueSortedLines(yLines, PERIMETER_ROUTE_LANE, stageSize.height - PERIMETER_ROUTE_LANE),
-  };
+  }
 }
 
 function compactOrthogonalPoints(points) {
-  if (points.length <= 2) return points;
-  const compacted = [points[0]];
+  if (points.length <= 2) return points
+  const compacted = [points[0]]
   for (let index = 1; index < points.length - 1; index++) {
-    const previous = compacted[compacted.length - 1];
-    const current = points[index];
-    const next = points[index + 1];
-    if ((previous.x === current.x && current.x === next.x)
-      || (previous.y === current.y && current.y === next.y)) continue;
-    compacted.push(current);
+    const previous = compacted[compacted.length - 1]
+    const current = points[index]
+    const next = points[index + 1]
+    if ((previous.x === current.x && current.x === next.x) || (previous.y === current.y && current.y === next.y))
+      continue
+    compacted.push(current)
   }
-  compacted.push(points[points.length - 1]);
-  return compacted;
+  compacted.push(points[points.length - 1])
+  return compacted
 }
 
 function enqueueRouteState(queue, entry) {
-  queue.push(entry);
-  let index = queue.length - 1;
+  queue.push(entry)
+  let index = queue.length - 1
   while (index > 0) {
-    const parentIndex = Math.floor((index - 1) / 2);
-    if (queue[parentIndex].cost <= queue[index].cost) break;
-    [queue[parentIndex], queue[index]] = [queue[index], queue[parentIndex]];
-    index = parentIndex;
+    const parentIndex = Math.floor((index - 1) / 2)
+    if (queue[parentIndex].cost <= queue[index].cost) break
+    ;[queue[parentIndex], queue[index]] = [queue[index], queue[parentIndex]]
+    index = parentIndex
   }
 }
 
 function dequeueRouteState(queue) {
-  if (queue.length <= 1) return queue.pop();
-  const next = queue[0];
-  queue[0] = queue.pop();
-  let index = 0;
+  if (queue.length <= 1) return queue.pop()
+  const next = queue[0]
+  queue[0] = queue.pop()
+  let index = 0
   while (true) {
-    const leftIndex = index * 2 + 1;
-    const rightIndex = leftIndex + 1;
-    let smallestIndex = index;
+    const leftIndex = index * 2 + 1
+    const rightIndex = leftIndex + 1
+    let smallestIndex = index
     if (leftIndex < queue.length && queue[leftIndex].cost < queue[smallestIndex].cost) {
-      smallestIndex = leftIndex;
+      smallestIndex = leftIndex
     }
     if (rightIndex < queue.length && queue[rightIndex].cost < queue[smallestIndex].cost) {
-      smallestIndex = rightIndex;
+      smallestIndex = rightIndex
     }
-    if (smallestIndex === index) break;
-    [queue[index], queue[smallestIndex]] = [queue[smallestIndex], queue[index]];
-    index = smallestIndex;
+    if (smallestIndex === index) break
+    ;[queue[index], queue[smallestIndex]] = [queue[smallestIndex], queue[index]]
+    index = smallestIndex
   }
-  return next;
+  return next
 }
 
 function findClearOrthogonalRoute(points) {
-  points = points.map(routePoint);
-  const obstacles = routeObstacleRects();
-  if (routeIsClear(points, obstacles)) return compactOrthogonalPoints(points);
+  points = points.map(routePoint)
+  const obstacles = routeObstacleRects()
+  if (routeIsClear(points, obstacles)) return compactOrthogonalPoints(points)
 
-  const start = points[0];
-  const end = points[points.length - 1];
-  const { xLines, yLines } = routeGridLines(start, end, points, obstacles);
-  const nodeKey = (x, y) => `${x},${y}`;
-  const parseKey = key => {
-    const [x, y] = key.split(',').map(Number);
-    return { x, y };
-  };
+  const start = points[0]
+  const end = points[points.length - 1]
+  const { xLines, yLines } = routeGridLines(start, end, points, obstacles)
+  const nodeKey = (x, y) => `${x},${y}`
+  const parseKey = (key) => {
+    const [x, y] = key.split(",").map(Number)
+    return { x, y }
+  }
   const nodeAllowed = (x, y) => {
-    const point = { x, y };
-    if ((x === start.x && y === start.y) || (x === end.x && y === end.y)) return true;
-    return !obstacles.some(rect => pointInRectInterior(point, rect));
-  };
-  const distances = new Map();
-  const previous = new Map();
-  const queue = [];
+    const point = { x, y }
+    if ((x === start.x && y === start.y) || (x === end.x && y === end.y)) return true
+    return !obstacles.some((rect) => pointInRectInterior(point, rect))
+  }
+  const distances = new Map()
+  const previous = new Map()
+  const queue = []
   // Search states are encoded as "x,y|previousAxis" where previousAxis is "none", "x", or "y".
   // Keeping the axis in the state lets turn penalties distinguish approaches to the same point.
-  const startState = `${nodeKey(start.x, start.y)}|none`;
-  distances.set(startState, 0);
-  enqueueRouteState(queue, { state: startState, cost: 0 });
+  const startState = `${nodeKey(start.x, start.y)}|none`
+  distances.set(startState, 0)
+  enqueueRouteState(queue, { state: startState, cost: 0 })
 
   while (queue.length) {
-    const { state, cost } = dequeueRouteState(queue);
-    if (cost !== distances.get(state)) continue;
-    const [key, previousAxis] = state.split('|');
-    const current = parseKey(key);
+    const { state, cost } = dequeueRouteState(queue)
+    if (cost !== distances.get(state)) continue
+    const [key, previousAxis] = state.split("|")
+    const current = parseKey(key)
     if (current.x === end.x && current.y === end.y) {
-      const route = [];
-      let cursor = state;
+      const route = []
+      let cursor = state
       while (cursor) {
-        route.push(parseKey(cursor.split('|')[0]));
-        cursor = previous.get(cursor);
+        route.push(parseKey(cursor.split("|")[0]))
+        cursor = previous.get(cursor)
       }
-      return compactOrthogonalPoints(route.reverse());
+      return compactOrthogonalPoints(route.reverse())
     }
 
-    const xIndex = xLines.indexOf(current.x);
-    const yIndex = yLines.indexOf(current.y);
+    const xIndex = xLines.indexOf(current.x)
+    const yIndex = yLines.indexOf(current.y)
     const neighbors = [
-      xIndex > 0 ? { x: xLines[xIndex - 1], y: current.y, axis: 'x' } : null,
-      xIndex < xLines.length - 1 ? { x: xLines[xIndex + 1], y: current.y, axis: 'x' } : null,
-      yIndex > 0 ? { x: current.x, y: yLines[yIndex - 1], axis: 'y' } : null,
-      yIndex < yLines.length - 1 ? { x: current.x, y: yLines[yIndex + 1], axis: 'y' } : null,
-    ].filter(Boolean);
+      xIndex > 0 ? { x: xLines[xIndex - 1], y: current.y, axis: "x" } : null,
+      xIndex < xLines.length - 1 ? { x: xLines[xIndex + 1], y: current.y, axis: "x" } : null,
+      yIndex > 0 ? { x: current.x, y: yLines[yIndex - 1], axis: "y" } : null,
+      yIndex < yLines.length - 1 ? { x: current.x, y: yLines[yIndex + 1], axis: "y" } : null,
+    ].filter(Boolean)
 
     for (const neighbor of neighbors) {
-      if (!nodeAllowed(neighbor.x, neighbor.y)) continue;
-      const next = { x: neighbor.x, y: neighbor.y };
-      if (segmentBlocked(current, next, obstacles)) continue;
-      const turnCost = previousAxis !== 'none' && previousAxis !== neighbor.axis ? ROUTE_TURN_PENALTY : 0;
-      const nextCost = cost + Math.abs(next.x - current.x) + Math.abs(next.y - current.y) + turnCost;
-      const nextState = `${nodeKey(next.x, next.y)}|${neighbor.axis}`;
-      const existingCost = distances.get(nextState);
-      if (existingCost !== undefined && nextCost >= existingCost) continue;
-      distances.set(nextState, nextCost);
-      previous.set(nextState, state);
-      enqueueRouteState(queue, { state: nextState, cost: nextCost });
+      if (!nodeAllowed(neighbor.x, neighbor.y)) continue
+      const next = { x: neighbor.x, y: neighbor.y }
+      if (segmentBlocked(current, next, obstacles)) continue
+      const turnCost = previousAxis !== "none" && previousAxis !== neighbor.axis ? ROUTE_TURN_PENALTY : 0
+      const nextCost = cost + Math.abs(next.x - current.x) + Math.abs(next.y - current.y) + turnCost
+      const nextState = `${nodeKey(next.x, next.y)}|${neighbor.axis}`
+      const existingCost = distances.get(nextState)
+      if (existingCost !== undefined && nextCost >= existingCost) continue
+      distances.set(nextState, nextCost)
+      previous.set(nextState, state)
+      enqueueRouteState(queue, { state: nextState, cost: nextCost })
     }
   }
 
-  return compactOrthogonalPoints(points);
+  return compactOrthogonalPoints(points)
 }
 
 function perimeterLaneY(start, end) {
-  const topCost = start.y + end.y;
-  const bottomCost = (stageSize.height - start.y) + (stageSize.height - end.y);
-  return topCost <= bottomCost ? PERIMETER_ROUTE_LANE : stageSize.height - PERIMETER_ROUTE_LANE;
+  const topCost = start.y + end.y
+  const bottomCost = stageSize.height - start.y + (stageSize.height - end.y)
+  return topCost <= bottomCost ? PERIMETER_ROUTE_LANE : stageSize.height - PERIMETER_ROUTE_LANE
 }
 
 function labelRotation(vertical, startY, endY) {
-  if (!vertical) return 0;
-  return endY < startY ? -90 : 90;
+  if (!vertical) return 0
+  return endY < startY ? -90 : 90
 }
 
 /**
@@ -1243,105 +1284,115 @@ function labelRotation(vertical, startY, endY) {
  */
 function routeSegmentAlong(segment) {
   if (segment.vertical) {
-    return { x: 0, y: segment.end.y >= segment.start.y ? 1 : -1 };
+    return { x: 0, y: segment.end.y >= segment.start.y ? 1 : -1 }
   }
-  return { x: segment.end.x >= segment.start.x ? 1 : -1, y: 0 };
+  return { x: segment.end.x >= segment.start.x ? 1 : -1, y: 0 }
 }
 
 const routedEdges = computed(() => {
-  const plans = visibleEdges.value.map(edge => {
-    const from = tileRects.value.get(edge.fromId);
-    const to = tileRects.value.get(edge.toId);
-    const groupDistance = Math.abs(from.groupIndex - to.groupIndex);
-    const sides = groupDistance === 0 ? sameGroupRouteSides(from, to) : horizontalRouteSides(from, to);
-    return { edge, from, to, groupDistance, ...sides };
-  });
+  const plans = visibleEdges.value.map((edge) => {
+    const from = tileRects.value.get(edge.fromId)
+    const to = tileRects.value.get(edge.toId)
+    const groupDistance = Math.abs(from.groupIndex - to.groupIndex)
+    const sides = groupDistance === 0 ? sameGroupRouteSides(from, to) : horizontalRouteSides(from, to)
+    return { edge, from, to, groupDistance, ...sides }
+  })
 
-  const endpointOffsets = new Map();
-  const endpointGroups = new Map();
+  const endpointOffsets = new Map()
+  const endpointGroups = new Map()
   for (const plan of plans) {
-    const fromCenter = rectCenter(plan.from);
-    const toCenter = rectCenter(plan.to);
+    const fromCenter = rectCenter(plan.from)
+    const toCenter = rectCenter(plan.to)
     const endpoints = [
-      { id: plan.edge.id, key: `${plan.edge.fromId}:${plan.startSide}`, endpoint: 'start', sort: plan.startSide === 'top' || plan.startSide === 'bottom' ? toCenter.x : toCenter.y },
-      { id: plan.edge.id, key: `${plan.edge.toId}:${plan.endSide}`, endpoint: 'end', sort: plan.endSide === 'top' || plan.endSide === 'bottom' ? fromCenter.x : fromCenter.y },
-    ];
+      {
+        id: plan.edge.id,
+        key: `${plan.edge.fromId}:${plan.startSide}`,
+        endpoint: "start",
+        sort: plan.startSide === "top" || plan.startSide === "bottom" ? toCenter.x : toCenter.y,
+      },
+      {
+        id: plan.edge.id,
+        key: `${plan.edge.toId}:${plan.endSide}`,
+        endpoint: "end",
+        sort: plan.endSide === "top" || plan.endSide === "bottom" ? fromCenter.x : fromCenter.y,
+      },
+    ]
     for (const endpoint of endpoints) {
-      if (!endpointGroups.has(endpoint.key)) endpointGroups.set(endpoint.key, []);
-      endpointGroups.get(endpoint.key).push(endpoint);
+      if (!endpointGroups.has(endpoint.key)) endpointGroups.set(endpoint.key, [])
+      endpointGroups.get(endpoint.key).push(endpoint)
     }
   }
   for (const endpoints of endpointGroups.values()) {
     endpoints
       .sort((a, b) => a.sort - b.sort || a.id.localeCompare(b.id))
       .forEach((endpoint, index) => {
-        endpointOffsets.set(`${endpoint.id}:${endpoint.endpoint}`, distributeOffset(index, endpoints.length));
-      });
+        endpointOffsets.set(`${endpoint.id}:${endpoint.endpoint}`, distributeOffset(index, endpoints.length))
+      })
   }
 
-  const corridorLaneOffsets = new Map();
-  const corridorLaneGroups = new Map();
+  const corridorLaneOffsets = new Map()
+  const corridorLaneGroups = new Map()
   for (const plan of plans) {
     for (const corridorIndex of corridorIndexesBetween(plan.from, plan.to)) {
-      if (!corridorLaneGroups.has(corridorIndex)) corridorLaneGroups.set(corridorIndex, []);
+      if (!corridorLaneGroups.has(corridorIndex)) corridorLaneGroups.set(corridorIndex, [])
       corridorLaneGroups.get(corridorIndex).push({
         id: plan.edge.id,
         sortKey: (rectCenter(plan.from).y + rectCenter(plan.to).y) / 2,
-      });
+      })
     }
   }
   for (const [corridorIndex, routes] of corridorLaneGroups) {
     routes
       .sort((a, b) => a.sortKey - b.sortKey || a.id.localeCompare(b.id))
       .forEach((route, index) => {
-        corridorLaneOffsets.set(`${route.id}:${corridorIndex}`, distributeOffset(index, routes.length, LANE_STEP));
-      });
+        corridorLaneOffsets.set(`${route.id}:${corridorIndex}`, distributeOffset(index, routes.length, LANE_STEP))
+      })
   }
 
-  const sameGroupLaneOffsets = new Map();
-  const sameGroupLaneGroups = new Map();
+  const sameGroupLaneOffsets = new Map()
+  const sameGroupLaneGroups = new Map()
   for (const plan of plans) {
-    const key = laneGroupKey(plan);
-    if (!key) continue;
-    if (!sameGroupLaneGroups.has(key)) sameGroupLaneGroups.set(key, []);
+    const key = laneGroupKey(plan)
+    if (!key) continue
+    if (!sameGroupLaneGroups.has(key)) sameGroupLaneGroups.set(key, [])
     sameGroupLaneGroups.get(key).push({
       id: plan.edge.id,
       sortKey: laneSortValue(plan),
-    });
+    })
   }
   for (const routes of sameGroupLaneGroups.values()) {
     routes
       .sort((a, b) => a.sortKey - b.sortKey || a.id.localeCompare(b.id))
       .forEach((route, index) => {
-        sameGroupLaneOffsets.set(route.id, distributeOffset(index, routes.length, SAME_GROUP_LANE_STEP));
-      });
+        sameGroupLaneOffsets.set(route.id, distributeOffset(index, routes.length, SAME_GROUP_LANE_STEP))
+      })
   }
 
-  return plans.map(plan => {
-    const { edge, from, to, groupDistance } = plan;
-    const startOffset = endpointOffsets.get(`${edge.id}:start`) || 0;
-    const endOffset = endpointOffsets.get(`${edge.id}:end`) || 0;
-    const startPort = pointOnRectSide(from, plan.startSide, startOffset);
-    const endPort = pointOnRectSide(to, plan.endSide, endOffset);
-    const start = pointOutsideRect(from, plan.startSide, startOffset);
-    const end = pointOutsideRect(to, plan.endSide, endOffset);
-    let points = [];
+  return plans.map((plan) => {
+    const { edge, from, to, groupDistance } = plan
+    const startOffset = endpointOffsets.get(`${edge.id}:start`) || 0
+    const endOffset = endpointOffsets.get(`${edge.id}:end`) || 0
+    const startPort = pointOnRectSide(from, plan.startSide, startOffset)
+    const endPort = pointOnRectSide(to, plan.endSide, endOffset)
+    const start = pointOutsideRect(from, plan.startSide, startOffset)
+    const end = pointOutsideRect(to, plan.endSide, endOffset)
+    let points = []
     if (groupDistance === 1) {
-      const corridor = adjacentCorridorBetween(from, to);
-      const laneOffset = corridorLaneOffsets.get(`${edge.id}:${Math.min(from.groupIndex, to.groupIndex)}`) || 0;
-      const midX = laneXInCorridor(corridor, laneOffset) ?? (start.x + end.x) / 2;
-      points = createVerticalBendPoints(start, end, midX);
+      const corridor = adjacentCorridorBetween(from, to)
+      const laneOffset = corridorLaneOffsets.get(`${edge.id}:${Math.min(from.groupIndex, to.groupIndex)}`) || 0
+      const midX = laneXInCorridor(corridor, laneOffset) ?? (start.x + end.x) / 2
+      points = createVerticalBendPoints(start, end, midX)
     } else if (groupDistance > 1) {
-      const corridorIndexes = corridorIndexesBetween(from, to);
-      const firstCorridorIndex = corridorIndexes[0];
-      const lastCorridorIndex = corridorIndexes[corridorIndexes.length - 1];
-      const firstCorridor = routeCorridors.value[firstCorridorIndex] || null;
-      const lastCorridor = routeCorridors.value[lastCorridorIndex] || null;
-      const firstLane = corridorLaneOffsets.get(`${edge.id}:${firstCorridorIndex}`) || 0;
-      const lastLane = corridorLaneOffsets.get(`${edge.id}:${lastCorridorIndex}`) || firstLane;
-      const startMidX = laneXInCorridor(firstCorridor, firstLane) ?? start.x;
-      const endMidX = laneXInCorridor(lastCorridor, lastLane) ?? end.x;
-      const perimeterY = perimeterLaneY(start, end);
+      const corridorIndexes = corridorIndexesBetween(from, to)
+      const firstCorridorIndex = corridorIndexes[0]
+      const lastCorridorIndex = corridorIndexes[corridorIndexes.length - 1]
+      const firstCorridor = routeCorridors.value[firstCorridorIndex] || null
+      const lastCorridor = routeCorridors.value[lastCorridorIndex] || null
+      const firstLane = corridorLaneOffsets.get(`${edge.id}:${firstCorridorIndex}`) || 0
+      const lastLane = corridorLaneOffsets.get(`${edge.id}:${lastCorridorIndex}`) || firstLane
+      const startMidX = laneXInCorridor(firstCorridor, firstLane) ?? start.x
+      const endMidX = laneXInCorridor(lastCorridor, lastLane) ?? end.x
+      const perimeterY = perimeterLaneY(start, end)
       points = [
         start,
         { x: startMidX, y: start.y },
@@ -1349,36 +1400,36 @@ const routedEdges = computed(() => {
         { x: endMidX, y: perimeterY },
         { x: endMidX, y: end.y },
         end,
-      ];
-    } else if (plan.axis === 'y') {
-      const top = plan.startSide === 'bottom' ? from.y + from.height : to.y + to.height;
-      const bottom = plan.startSide === 'bottom' ? to.y : from.y;
-      const laneOffset = sameGroupLaneOffsets.get(edge.id) || 0;
-      const midY = (top + bottom) / 2 + laneOffset;
-      points = [start, { x: start.x, y: midY }, { x: end.x, y: midY }, end];
-    } else if (plan.axis === 'x') {
-      const left = plan.startSide === 'right' ? from.x + from.width : to.x + to.width;
-      const right = plan.startSide === 'right' ? to.x : from.x;
-      const laneOffset = sameGroupLaneOffsets.get(edge.id) || 0;
-      const midX = (left + right) / 2 + laneOffset;
-      points = createVerticalBendPoints(start, end, midX);
+      ]
+    } else if (plan.axis === "y") {
+      const top = plan.startSide === "bottom" ? from.y + from.height : to.y + to.height
+      const bottom = plan.startSide === "bottom" ? to.y : from.y
+      const laneOffset = sameGroupLaneOffsets.get(edge.id) || 0
+      const midY = (top + bottom) / 2 + laneOffset
+      points = [start, { x: start.x, y: midY }, { x: end.x, y: midY }, end]
+    } else if (plan.axis === "x") {
+      const left = plan.startSide === "right" ? from.x + from.width : to.x + to.width
+      const right = plan.startSide === "right" ? to.x : from.x
+      const laneOffset = sameGroupLaneOffsets.get(edge.id) || 0
+      const midX = (left + right) / 2 + laneOffset
+      points = createVerticalBendPoints(start, end, midX)
     } else {
-      const routeOnRight = plan.startSide === 'right';
+      const routeOnRight = plan.startSide === "right"
       const rawMidX = routeOnRight
         ? Math.max(from.x + from.width, to.x + to.width) + SAME_GROUP_ROUTE_PADDING
-        : Math.min(from.x, to.x) - SAME_GROUP_ROUTE_PADDING;
-      const laneOffset = sameGroupLaneOffsets.get(edge.id) || 0;
-      const midX = clamp(rawMidX + (routeOnRight ? laneOffset : -laneOffset), ROUTE_EDGE_PADDING, stageSize.width - ROUTE_EDGE_PADDING);
-      points = createVerticalBendPoints(start, end, midX);
+        : Math.min(from.x, to.x) - SAME_GROUP_ROUTE_PADDING
+      const laneOffset = sameGroupLaneOffsets.get(edge.id) || 0
+      const midX = clamp(
+        rawMidX + (routeOnRight ? laneOffset : -laneOffset),
+        ROUTE_EDGE_PADDING,
+        stageSize.width - ROUTE_EDGE_PADDING,
+      )
+      points = createVerticalBendPoints(start, end, midX)
     }
 
-    const strokeWidth = 1.1 + Math.min(1.8, (edge.weight || DEFAULT_EDGE_WEIGHT) / 8);
-    points = findClearOrthogonalRoute(points);
-    points = [
-      routePoint(startPort),
-      ...points,
-      routePoint(endPort),
-    ];
+    const strokeWidth = 1.1 + Math.min(1.8, (edge.weight || DEFAULT_EDGE_WEIGHT) / 8)
+    points = findClearOrthogonalRoute(points)
+    points = [routePoint(startPort), ...points, routePoint(endPort)]
     return {
       id: edge.id,
       edge,
@@ -1396,9 +1447,9 @@ const routedEdges = computed(() => {
       touchesFocus: edge.fromId === props.currentId || edge.toId === props.currentId,
       strokeWidth,
       hitStrokeWidth: strokeWidth + ROUTE_HIT_PADDING,
-    };
-  });
-});
+    }
+  })
+})
 
 /**
  * Picks the best label position on the route: the midpoint of the longest
@@ -1407,24 +1458,24 @@ const routedEdges = computed(() => {
  * the segment's own bounds so collision nudges stay on the line.
  */
 function routeLabelPlacement(route) {
-  const segments = [];
+  const segments = []
   for (let index = 1; index < route.points.length; index++) {
-    const start = route.points[index - 1];
-    const end = route.points[index];
-    const horizontal = start.y === end.y;
-    const vertical = start.x === end.x;
-    if (!horizontal && !vertical) continue;
+    const start = route.points[index - 1]
+    const end = route.points[index]
+    const horizontal = start.y === end.y
+    const vertical = start.x === end.x
+    if (!horizontal && !vertical) continue
     segments.push({
       start,
       end,
       vertical,
       length: horizontal ? Math.abs(end.x - start.x) : Math.abs(end.y - start.y),
-    });
+    })
   }
   const horizontal = segments
-    .filter(segment => !segment.vertical && segment.length >= 42)
-    .sort((a, b) => b.length - a.length)[0];
-  const segment = horizontal || segments.sort((a, b) => b.length - a.length)[0];
+    .filter((segment) => !segment.vertical && segment.length >= 42)
+    .sort((a, b) => b.length - a.length)[0]
+  const segment = horizontal || segments.sort((a, b) => b.length - a.length)[0]
   if (!segment) {
     return {
       x: (route.startX + route.endX) / 2,
@@ -1433,9 +1484,9 @@ function routeLabelPlacement(route) {
       rotation: 0,
       along: { x: 1, y: 0 },
       segmentBounds: null,
-    };
+    }
   }
-  const vertical = !horizontal && segment.vertical && segment.length >= MIN_VERTICAL_LABEL_LENGTH;
+  const vertical = !horizontal && segment.vertical && segment.length >= MIN_VERTICAL_LABEL_LENGTH
   return {
     x: (segment.start.x + segment.end.x) / 2,
     y: (segment.start.y + segment.end.y) / 2,
@@ -1448,7 +1499,7 @@ function routeLabelPlacement(route) {
       minY: Math.min(segment.start.y, segment.end.y),
       maxY: Math.max(segment.start.y, segment.end.y),
     },
-  };
+  }
 }
 
 /**
@@ -1457,32 +1508,34 @@ function routeLabelPlacement(route) {
 function labelBounds(label) {
   const width = Math.min(
     LABEL_MAX_WIDTH,
-    Math.max(LABEL_MIN_WIDTH, label.label.length * LABEL_CHARACTER_WIDTH_ESTIMATE + LABEL_HORIZONTAL_PADDING_ESTIMATE)
-  );
-  const halfWidth = label.vertical ? LABEL_HEIGHT / 2 : width / 2;
-  const halfHeight = label.vertical ? width / 2 : LABEL_HEIGHT / 2;
+    Math.max(LABEL_MIN_WIDTH, label.label.length * LABEL_CHARACTER_WIDTH_ESTIMATE + LABEL_HORIZONTAL_PADDING_ESTIMATE),
+  )
+  const halfWidth = label.vertical ? LABEL_HEIGHT / 2 : width / 2
+  const halfHeight = label.vertical ? width / 2 : LABEL_HEIGHT / 2
   return {
     left: label.x - halfWidth,
     right: label.x + halfWidth,
     top: label.y - halfHeight,
     bottom: label.y + halfHeight,
-  };
+  }
 }
 
 /**
  * Detects whether two label bounds overlap after applying the collision gap.
  */
 function boundsOverlap(a, b) {
-  return a.left < b.right + LABEL_COLLISION_GAP
-    && a.right + LABEL_COLLISION_GAP > b.left
-    && a.top < b.bottom + LABEL_COLLISION_GAP
-    && a.bottom + LABEL_COLLISION_GAP > b.top;
+  return (
+    a.left < b.right + LABEL_COLLISION_GAP &&
+    a.right + LABEL_COLLISION_GAP > b.left &&
+    a.top < b.bottom + LABEL_COLLISION_GAP &&
+    a.bottom + LABEL_COLLISION_GAP > b.top
+  )
 }
 
 const routeLabels = computed(() => {
-  const placed = [];
-  return routedEdges.value.map(route => {
-    const placement = routeLabelPlacement(route);
+  const placed = []
+  return routedEdges.value.map((route) => {
+    const placement = routeLabelPlacement(route)
     const label = {
       id: route.id,
       label: route.label,
@@ -1495,37 +1548,40 @@ const routeLabels = computed(() => {
       rotation: placement.rotation,
       x: placement.x,
       y: placement.y,
-    };
+    }
 
     // Slide the label along its segment to avoid overlapping other labels.
     // Sliding along the segment (not perpendicular) keeps the label on its line.
-    let attempt = 0;
-    let currentBounds = labelBounds(label);
-    while (placed.some(existing => boundsOverlap(currentBounds, labelBounds(existing))) && attempt < LABEL_PLACEMENT_MAX_ATTEMPTS) {
-      const direction = attempt % 2 === 0 ? 1 : -1;
-      const distance = Math.ceil((attempt + 1) / 2) * LABEL_STACK_STEP;
-      label.x = placement.x + placement.along.x * direction * distance;
-      label.y = placement.y + placement.along.y * direction * distance;
+    let attempt = 0
+    let currentBounds = labelBounds(label)
+    while (
+      placed.some((existing) => boundsOverlap(currentBounds, labelBounds(existing))) &&
+      attempt < LABEL_PLACEMENT_MAX_ATTEMPTS
+    ) {
+      const direction = attempt % 2 === 0 ? 1 : -1
+      const distance = Math.ceil((attempt + 1) / 2) * LABEL_STACK_STEP
+      label.x = placement.x + placement.along.x * direction * distance
+      label.y = placement.y + placement.along.y * direction * distance
       // Clamp within the segment so the label never leaves its line.
       if (placement.segmentBounds) {
-        label.x = clamp(label.x, placement.segmentBounds.minX, placement.segmentBounds.maxX);
-        label.y = clamp(label.y, placement.segmentBounds.minY, placement.segmentBounds.maxY);
+        label.x = clamp(label.x, placement.segmentBounds.minX, placement.segmentBounds.maxX)
+        label.y = clamp(label.y, placement.segmentBounds.minY, placement.segmentBounds.maxY)
       }
-      currentBounds = labelBounds(label);
-      attempt++;
+      currentBounds = labelBounds(label)
+      attempt++
     }
 
-    placed.push(label);
+    placed.push(label)
     return {
       ...label,
       style: {
         left: `${label.x}px`,
         top: `${label.y}px`,
-        '--memo-label-rotation': `${label.rotation}deg`,
+        "--memo-label-rotation": `${label.rotation}deg`,
       },
-    };
-  });
-});
+    }
+  })
+})
 
 /**
  * Builds SVG polygon points for an arrowhead tip at point, facing along unit.
@@ -1534,99 +1590,101 @@ function arrowheadPolygon(point, unit) {
   const base = {
     x: point.x - unit.x * ARROWHEAD_LENGTH,
     y: point.y - unit.y * ARROWHEAD_LENGTH,
-  };
-  const perpendicular = { x: -unit.y, y: unit.x };
+  }
+  const perpendicular = { x: -unit.y, y: unit.x }
   const left = {
-    x: base.x + perpendicular.x * ARROWHEAD_WIDTH / 2,
-    y: base.y + perpendicular.y * ARROWHEAD_WIDTH / 2,
-  };
+    x: base.x + (perpendicular.x * ARROWHEAD_WIDTH) / 2,
+    y: base.y + (perpendicular.y * ARROWHEAD_WIDTH) / 2,
+  }
   const right = {
-    x: base.x - perpendicular.x * ARROWHEAD_WIDTH / 2,
-    y: base.y - perpendicular.y * ARROWHEAD_WIDTH / 2,
-  };
-  return `${point.x},${point.y} ${left.x},${left.y} ${right.x},${right.y}`;
+    x: base.x - (perpendicular.x * ARROWHEAD_WIDTH) / 2,
+    y: base.y - (perpendicular.y * ARROWHEAD_WIDTH) / 2,
+  }
+  return `${point.x},${point.y} ${left.x},${left.y} ${right.x},${right.y}`
 }
 
 function arrowUnitForEndSide(side) {
-  return {
-    left: { x: 1, y: 0 },
-    right: { x: -1, y: 0 },
-    top: { x: 0, y: 1 },
-    bottom: { x: 0, y: -1 },
-  }[side] || { x: 1, y: 0 };
+  return (
+    {
+      left: { x: 1, y: 0 },
+      right: { x: -1, y: 0 },
+      top: { x: 0, y: 1 },
+      bottom: { x: 0, y: -1 },
+    }[side] || { x: 1, y: 0 }
+  )
 }
 
 const routeArrowheads = computed(() =>
-  routedEdges.value.map(route => {
-    const tip = route.points[route.points.length - 1];
+  routedEdges.value.map((route) => {
+    const tip = route.points[route.points.length - 1]
     return {
       id: route.id,
       route,
       points: arrowheadPolygon(tip, arrowUnitForEndSide(route.endSide)),
-    };
-  })
-);
+    }
+  }),
+)
 
 function handleTileClick(tile) {
-  if (tile.id !== props.currentId) emit('navigate', tile.id);
+  if (tile.id !== props.currentId) emit("navigate", tile.id)
 }
 
 function navigateToRouteNode(nodeId) {
-  if (nodeId && nodeId !== props.currentId) emit('navigate', nodeId);
+  if (nodeId && nodeId !== props.currentId) emit("navigate", nodeId)
 }
 
 function handleTileKeydown(event, tile) {
-  if (event.target !== event.currentTarget) return;
-  handleTileClick(tile);
+  if (event.target !== event.currentTarget) return
+  handleTileClick(tile)
 }
 
 function setTileEditorHost(el) {
-  tileEditorHost = el;
+  tileEditorHost = el
 }
 
 function hideTileImageResizeBar() {
-  tileImageResizeBar.visible = false;
-  tileImageResizeBar.imageEl = null;
+  tileImageResizeBar.visible = false
+  tileImageResizeBar.imageEl = null
 }
 
 function showTileImageResizeBar(imgEl) {
-  const editorRect = tileEditor.root.getBoundingClientRect();
-  const imgRect = imgEl.getBoundingClientRect();
-  tileImageResizeBar.imageEl = imgEl;
-  tileImageResizeBar.top = imgRect.bottom - editorRect.top + tileEditor.root.scrollTop + 4;
-  tileImageResizeBar.left = imgRect.left - editorRect.left;
-  tileImageResizeBar.visible = true;
+  const editorRect = tileEditor.root.getBoundingClientRect()
+  const imgRect = imgEl.getBoundingClientRect()
+  tileImageResizeBar.imageEl = imgEl
+  tileImageResizeBar.top = imgRect.bottom - editorRect.top + tileEditor.root.scrollTop + 4
+  tileImageResizeBar.left = imgRect.left - editorRect.left
+  tileImageResizeBar.visible = true
 }
 
 function attachTileImageClickHandlers() {
-  if (!tileEditor) return;
+  if (!tileEditor) return
   if (tileImageClickHandler) {
-    tileEditor.root.removeEventListener('click', tileImageClickHandler);
+    tileEditor.root.removeEventListener("click", tileImageClickHandler)
   }
   tileImageClickHandler = (event) => {
-    if (event.target.tagName === 'IMG') {
-      showTileImageResizeBar(event.target);
+    if (event.target.tagName === "IMG") {
+      showTileImageResizeBar(event.target)
     } else {
-      hideTileImageResizeBar();
+      hideTileImageResizeBar()
     }
-  };
-  tileEditor.root.addEventListener('click', tileImageClickHandler);
+  }
+  tileEditor.root.addEventListener("click", tileImageClickHandler)
 }
 
 function removeTileImageClickHandlers() {
   if (tileEditor && tileImageClickHandler) {
-    tileEditor.root.removeEventListener('click', tileImageClickHandler);
+    tileEditor.root.removeEventListener("click", tileImageClickHandler)
   }
-  tileImageClickHandler = null;
+  tileImageClickHandler = null
 }
 
 function resizeSelectedTileImage(widthPct) {
-  if (!tileImageResizeBar.imageEl || !tileEditor) return;
-  const blot = Quill.find(tileImageResizeBar.imageEl);
+  if (!tileImageResizeBar.imageEl || !tileEditor) return
+  const blot = Quill.find(tileImageResizeBar.imageEl)
   if (blot) {
-    tileEditor.formatText(tileEditor.getIndex(blot), 1, 'width', widthPct === 100 ? false : `${widthPct}%`, 'user');
+    tileEditor.formatText(tileEditor.getIndex(blot), 1, "width", widthPct === 100 ? false : `${widthPct}%`, "user")
   }
-  hideTileImageResizeBar();
+  hideTileImageResizeBar()
 }
 
 /**
@@ -1637,160 +1695,161 @@ function resizeSelectedTileImage(widthPct) {
  */
 function restoreEditorContents(quill, serializedDelta) {
   try {
-    const parsed = JSON.parse(serializedDelta);
-    quill.setContents(sanitizeRichDelta(parsed));
-    return true;
+    const parsed = JSON.parse(serializedDelta)
+    quill.setContents(sanitizeRichDelta(parsed))
+    return true
   } catch (error) {
-    console.warn('Unable to restore graph tile editor contents from Delta; will attempt to load from HTML or plain text fallback.', error);
-    return false;
+    console.warn(
+      "Unable to restore graph tile editor contents from Delta; will attempt to load from HTML or plain text fallback.",
+      error,
+    )
+    return false
   }
 }
 
 function initTileEditor() {
-  if (!tileEditorHost || !editingTileId.value) return;
-  tileEditorHost.replaceChildren();
-  const editorEl = document.createElement('div');
-  tileEditorHost.appendChild(editorEl);
+  if (!tileEditorHost || !editingTileId.value) return
+  tileEditorHost.replaceChildren()
+  const editorEl = document.createElement("div")
+  tileEditorHost.appendChild(editorEl)
   try {
     tileEditor = new Quill(editorEl, {
-      theme: 'snow',
-      placeholder: 'Write something about this page…',
+      theme: "snow",
+      placeholder: "Write something about this page…",
       modules: {
         toolbar: RICH_CONTENT_TOOLBAR,
         uploader: {
           handler: imageUploadHandler,
         },
       },
-    });
+    })
   } catch (error) {
-    tileEditor = null;
-    tileEditorHost.textContent = 'Unable to initialize the rich editor. Cancel and try again.';
-    console.warn('Unable to initialize graph tile rich editor.', error);
-    return;
+    tileEditor = null
+    tileEditorHost.textContent = "Unable to initialize the rich editor. Cancel and try again."
+    console.warn("Unable to initialize graph tile rich editor.", error)
+    return
   }
-  const deltaRestored = tileDraft.bodyDelta && restoreEditorContents(tileEditor, tileDraft.bodyDelta);
+  const deltaRestored = tileDraft.bodyDelta && restoreEditorContents(tileEditor, tileDraft.bodyDelta)
   if (!deltaRestored && tileDraft.bodyHtml) {
-    tileEditor.clipboard.dangerouslyPasteHTML(sanitizeRichHtml(normalizeEditorHtml(tileDraft.bodyHtml)));
+    tileEditor.clipboard.dangerouslyPasteHTML(sanitizeRichHtml(normalizeEditorHtml(tileDraft.bodyHtml)))
   } else if (!deltaRestored && tileDraft.fallbackText) {
-    tileEditor.setText(tileDraft.fallbackText);
+    tileEditor.setText(tileDraft.fallbackText)
   }
-  attachTileImageClickHandlers();
+  attachTileImageClickHandlers()
 }
 
 async function startTileEdit(tile) {
   if (editingTileId.value && editingTileId.value !== tile.id) {
-    cancelTileEdit();
+    cancelTileEdit()
   } else {
-    removeTileImageClickHandlers();
-    hideTileImageResizeBar();
-    tileEditor = null;
+    removeTileImageClickHandlers()
+    hideTileImageResizeBar()
+    tileEditor = null
   }
-  editingTileId.value = tile.id;
-  tileDraft.title = tile.title;
-  tileDraft.bodyDelta = tile.bodyDelta || '';
-  tileDraft.bodyHtml = tile.bodyHtml || '';
-  tileDraft.fallbackText = tile.bodyText || '';
-  await nextTick();
-  initTileEditor();
+  editingTileId.value = tile.id
+  tileDraft.title = tile.title
+  tileDraft.bodyDelta = tile.bodyDelta || ""
+  tileDraft.bodyHtml = tile.bodyHtml || ""
+  tileDraft.fallbackText = tile.bodyText || ""
+  await nextTick()
+  initTileEditor()
 }
 
 function cancelTileEdit() {
-  removeTileImageClickHandlers();
-  hideTileImageResizeBar();
-  tileEditor = null;
-  editingTileId.value = '';
-  tileDraft.title = '';
-  tileDraft.bodyDelta = '';
-  tileDraft.bodyHtml = '';
-  tileDraft.fallbackText = '';
+  removeTileImageClickHandlers()
+  hideTileImageResizeBar()
+  tileEditor = null
+  editingTileId.value = ""
+  tileDraft.title = ""
+  tileDraft.bodyDelta = ""
+  tileDraft.bodyHtml = ""
+  tileDraft.fallbackText = ""
 }
 
 function saveTileEdit() {
-  if (!editingTileId.value) return;
-  const bodyDelta = tileEditor ? JSON.stringify(sanitizeRichDelta(tileEditor.getContents())) : tileDraft.bodyDelta;
-  const bodyHtml = tileEditor ? sanitizeRichHtml(normalizeEditorHtml(tileEditor.root.innerHTML)) : tileDraft.bodyHtml;
-  emit('update-page', {
+  if (!editingTileId.value) return
+  const bodyDelta = tileEditor ? JSON.stringify(sanitizeRichDelta(tileEditor.getContents())) : tileDraft.bodyDelta
+  const bodyHtml = tileEditor ? sanitizeRichHtml(normalizeEditorHtml(tileEditor.root.innerHTML)) : tileDraft.bodyHtml
+  emit("update-page", {
     id: editingTileId.value,
     title: tileDraft.title,
     bodyDelta,
     bodyHtml,
-  });
-  cancelTileEdit();
+  })
+  cancelTileEdit()
 }
 
 function activateNode(nodeId) {
-  activeNodeId.value = nodeId;
-  activeEdgeId.value = '';
+  activeNodeId.value = nodeId
+  activeEdgeId.value = ""
 }
 
 function activateRoute(route) {
-  activeEdgeId.value = route.id;
-  activeNodeId.value = '';
+  activeEdgeId.value = route.id
+  activeNodeId.value = ""
 }
 
 function activatePopoverNode(nodeId, route) {
-  popoverNodeId.value = nodeId;
-  activateRoute(route);
+  popoverNodeId.value = nodeId
+  activateRoute(route)
 }
 
 function clearPopoverNode(route) {
-  popoverNodeId.value = '';
-  activateRoute(route);
+  popoverNodeId.value = ""
+  activateRoute(route)
 }
 
 function clearHighlight() {
-  activeNodeId.value = '';
-  activeEdgeId.value = '';
-  popoverNodeId.value = '';
+  activeNodeId.value = ""
+  activeEdgeId.value = ""
+  popoverNodeId.value = ""
 }
 
 function clearHighlightIfFocusLeaves(event) {
-  const nextTarget = event.relatedTarget;
-  if (!nextTarget || !event.currentTarget.contains(nextTarget)) clearHighlight();
+  const nextTarget = event.relatedTarget
+  if (!nextTarget || !event.currentTarget.contains(nextTarget)) clearHighlight()
 }
 
 function routeTouchesActiveNode(route) {
-  return !!activeNodeId.value && (route.fromId === activeNodeId.value || route.toId === activeNodeId.value);
+  return !!activeNodeId.value && (route.fromId === activeNodeId.value || route.toId === activeNodeId.value)
 }
 
 function isRouteActive(route) {
-  return activeEdgeId.value === route.id || routeTouchesActiveNode(route);
+  return activeEdgeId.value === route.id || routeTouchesActiveNode(route)
 }
 
 function isTileActive(tileId) {
-  if (!tileId) return false;
-  if (activeNodeId.value === tileId) return true;
+  if (!tileId) return false
+  if (activeNodeId.value === tileId) return true
   if (activeEdgeId.value) {
-    const activeRoute = routedEdges.value.find(route => route.id === activeEdgeId.value);
-    return !!activeRoute && (activeRoute.fromId === tileId || activeRoute.toId === tileId);
+    const activeRoute = routedEdges.value.find((route) => route.id === activeEdgeId.value)
+    return !!activeRoute && (activeRoute.fromId === tileId || activeRoute.toId === tileId)
   }
-  if (!activeNodeId.value) return false;
-  return routedEdges.value.some(route => routeTouchesActiveNode(route) && (route.fromId === tileId || route.toId === tileId));
+  if (!activeNodeId.value) return false
+  return routedEdges.value.some(
+    (route) => routeTouchesActiveNode(route) && (route.fromId === tileId || route.toId === tileId),
+  )
 }
 
 function isPopoverTarget(tileId) {
-  return !!tileId && popoverNodeId.value === tileId;
+  return !!tileId && popoverNodeId.value === tileId
 }
 
 function updateStageSize() {
-  const rect = stageEl.value?.getBoundingClientRect();
-  stageSize.width = Math.round(rect?.width || 0);
-  stageSize.height = Math.round(rect?.height || 0);
+  const rect = stageEl.value?.getBoundingClientRect()
+  stageSize.width = Math.round(rect?.width || 0)
+  stageSize.height = Math.round(rect?.height || 0)
 }
 
 onMounted(() => {
-  updateStageSize();
-  resizeObserver = new ResizeObserver(updateStageSize);
-  if (stageEl.value) resizeObserver.observe(stageEl.value);
-});
+  updateStageSize()
+  resizeObserver = new ResizeObserver(updateStageSize)
+  if (stageEl.value) resizeObserver.observe(stageEl.value)
+})
 
 onBeforeUnmount(() => {
-  resizeObserver?.disconnect();
-});
+  resizeObserver?.disconnect()
+})
 
-watch(
-  () => [props.nodes, props.edges, props.currentId],
-  updateStageSize,
-  { deep: true }
-);
+watch(() => [props.nodes, props.edges, props.currentId], updateStageSize, { deep: true })
 </script>
