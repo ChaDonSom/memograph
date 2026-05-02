@@ -5,6 +5,7 @@ export default {}
 import { useElementSize } from "@vueuse/core"
 import { hierarchy, treemap, treemapDice, treemapSlice, treemapSquarify } from "d3-hierarchy"
 import { computed, ref } from "vue"
+import MyTreemapViewNode from "./MyTreemapViewNode.vue"
 
 const props = defineProps<{
   nodes: any[]
@@ -130,21 +131,13 @@ const nodesById = computed(() => {
       <h2>By visit...</h2>
     </div>
     <div class="relative w-full h-full min-h-full">
-      <div
+      <MyTreemapViewNode
+        :node="node"
+        :current-id="currentId"
+        :nodes-by-id="nodesById"
         v-for="node in nodesWithPositions"
         :key="node.id"
-        :style="{
-          position: 'absolute',
-          left: node.x + 'px',
-          top: node.y + 'px',
-          width: node.width + 'px',
-          height: node.height + 'px',
-          zIndex: props.currentId === node.id ? 10 : 1,
-        }"
-        class="bg-blue-500 text-white flex items-center justify-center rounded overflow-hidden px-2 text-center"
-      >
-        {{ nodesById[node.id].title }} ({{ nodesById[node.id].visits }})
-      </div>
+      />
     </div>
   </div>
 </template>
