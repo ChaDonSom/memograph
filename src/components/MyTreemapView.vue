@@ -5,10 +5,12 @@ export default {}
 import { useElementSize } from "@vueuse/core"
 import { hierarchy, treemap, treemapDice, treemapSlice, treemapSquarify } from "d3-hierarchy"
 import { computed, ref } from "vue"
+import { buildNeighborSummary, findStrongestNeighborOverlaps } from "./communityDiscovering"
 import MyTreemapViewNode from "./MyTreemapViewNode.vue"
 
 const props = defineProps<{
   nodes: any[]
+  // Graph edges use the same shape as the rest of the app: fromId -> toId.
   edges: any[]
   currentId: string
 }>()
@@ -23,6 +25,11 @@ const GUTTER = 4
 // than D3's default golden-ratio setting without forcing every tile to be square.
 const TREEMAP_ASPECT_RATIO = 1.18
 const FEATURED_COUNT = 3
+
+// Keep the component-side names simple. The heavier graph-reading logic lives next door.
+const neighborSummary = computed(() => buildNeighborSummary(props.nodes, props.edges))
+
+const strongestNeighborOverlaps = computed(() => findStrongestNeighborOverlaps(props.nodes, props.edges))
 
 const squarifyTile = treemapSquarify.ratio(TREEMAP_ASPECT_RATIO)
 
@@ -127,8 +134,18 @@ const nodesById = computed(() => {
 
 <template>
   <div class="p-4 w-full h-full overflow-y-scroll" ref="mainRef">
-    <div class="fixed right-3 top-3 p-2">
-      <h2>By visit...</h2>
+    <div
+      class="fixed right-3 top-3 max-h-[calc(100vh-1.5rem)] max-w-lg overflow-auto rounded bg-white/95 p-3 text-xs text-slate-900 shadow-lg z-30"
+    >
+      <h2 class="mb-2 text-sm font-semibold">Community discovery debug</h2>
+      <details>
+        <summary class="cursor-pointer font-medium">Neighbor summary</summary>
+        <pre>{{ JSON.stringify(neighborSummary.slice(0, 20), null, 2) }}</pre>
+      </details>
+      <details open>
+        <summary class="cursor-pointer font-medium">Shared-neighbor pairs</summary>
+        <pre>{{ JSON.stringify(strongestNeighborOverlaps, null, 2) }}</pre>
+      </details>
     </div>
     <div class="relative w-full h-full min-h-full">
       <MyTreemapViewNode
